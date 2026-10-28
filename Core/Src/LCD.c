@@ -22,22 +22,39 @@ void LCD_Init(LCD_Handle *lcd, SPI_HandleTypeDef *hspi,
     lcd->cs_pin = cs_pin;
     lcd->rs_port = rs_port;
     lcd->rs_pin = rs_pin;
-
+    printf("Initializing LCD...\r\n");
     HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);   /* CSB idle HIGH */
 
-    HAL_Delay(50);              /* > 40 ms after VDD stable */
+    // HAL_Delay(50);              /* > 40 ms after VDD stable */
 
-    sendCommand(lcd, 0x38);     /* 8-bit, 2-line (20x4), 5x8 font */
+    // sendCommand(lcd, 0x38);     /* 8-bit, 2-line (20x4), 5x8 font */
+    // HAL_Delay(1);
+
+    // sendCommand(lcd, 0x0C);     /* Display ON, cursor OFF, blink OFF */
+    // HAL_Delay(1);
+
+    // sendCommand(lcd, 0x01);     /* Clear display */
+    // HAL_Delay(12);
+
+    // sendCommand(lcd, 0x06);     /* Entry mode: increment, no shift */
+    // HAL_Delay(1);
+
+    sendCommand(lcd, 0x3A);   /* Function set: 8-bit, N=1, RE=1 (extended set) */
+    HAL_Delay(1);
+    sendCommand(lcd, 0x09);   /* Extended function set: NW=1 (4-line mode) */
+    HAL_Delay(1);
+    sendCommand(lcd, 0x38);   /* Function set: 8-bit, N=1, RE=0 (back to normal set) */
     HAL_Delay(1);
 
-    sendCommand(lcd, 0x0C);     /* Display ON, cursor OFF, blink OFF */
+    sendCommand(lcd, 0x0C);   /* Display ON */
     HAL_Delay(1);
-
-    sendCommand(lcd, 0x01);     /* Clear display */
+    sendCommand(lcd, 0x01);   /* Clear */
     HAL_Delay(12);
-
-    sendCommand(lcd, 0x06);     /* Entry mode: increment, no shift */
+    sendCommand(lcd, 0x06);   /* Entry mode */
     HAL_Delay(1);
+
+    HAL_Delay(50);
+
 
     lcd->displayControl = LCD_DISPLAYON;
     sendCommand(lcd, LCD_DISPLAYCONTROL | lcd->displayControl);

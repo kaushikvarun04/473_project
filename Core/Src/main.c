@@ -1,4 +1,4 @@
-/* USER CODE BEGIN Header */
+1/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -20,11 +20,15 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "fatfs.h"
-#include "stdio.h"
-#include <string.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include "FATFS_SD.h"
+#include "LCD.h"
+#include "CAN.h"
+#include "stdio.h"
+#include "FreeRTOS.h"
 
 /* USER CODE END Includes */
 
@@ -54,13 +58,10 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim2;
-
 extern volatile uint16_t Timer1, Timer2;   /* defined in fatfs_sd.c */
 char TxBuffer[250];
 
-
 osThreadId defaultTaskHandle;
-osThreadId sdTaskHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -75,18 +76,19 @@ static void MX_LPUART1_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_SPI3_Init(void);
 void StartDefaultTask(void const * argument);
-static void SD_Card_Test(void);
 
 /* USER CODE BEGIN PFP */
+static void SD_Card_Test(void);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void StartSdTask(void const *argument);
+TaskHandle_t StartSdTask = NULL;
+TaskHandle_t LCD_Task = NULL;
 
-void StartSdTask(void const *argument)
+void vStartSdTask(void *pvparameters)
 {
   printf("SD task started\r\n");
 
@@ -97,6 +99,24 @@ void StartSdTask(void const *argument)
     osDelay(1000);         /* idle once the test is done */
   }
 }
+
+void vLCD_Task(void *pvparameters)
+{
+  osDelay(1000);  /* wait for SPI3 to be initialized */
+  printf("LCD task started\r\n");
+  LCD_Handle lcd;
+  LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
+  LCD_Clear(&lcd);
+  LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
+  osDelay(500);
+  LCD_PrintStrAt(&lcd,0,2, "speed:");
+  for (;;)
+  {
+    osDelay(1000);         /* idle once the test is done */
+  }
+}
+
+
 
 static void SD_Card_Test(void)
 {
@@ -245,7 +265,10 @@ int main(void)
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
-  SD_Card_Test();
+
+  xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
+  xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 6 , &LCD_Task);
+
 
   /* USER CODE END 2 */
 
@@ -266,33 +289,29 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
+  /* definition and creation of defaultTask */
+  // osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
+  // defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
+  // /* USER CODE BEGIN RTOS_THREADS */
+  
 
-  /* USER CODE BEGIN RTOS_THREADS */
-  osThreadDef(SD, StartSdTask, osPriorityNormal, 0, 1024);
-  sdTaskHandle = osThreadCreate(osThread(SD), NULL);
-  if(sdTaskHandle == NULL)
-  {
-    printf("Error creating SD task\r\n");
-    Error_Handler();
-  }
+  // // /* add threads, ... */
+  // /* USER CODE END RTOS_THREADS */
 
-  /* add threads, ... */
-  /* USER CODE END RTOS_THREADS */
+  // /* Initialize leds */
+  // BSP_LED_Init(LED_GREEN);
 
-  /* Initialize leds */
-  BSP_LED_Init(LED_GREEN);
-
-  /* Start scheduler */
-  osKernelStart();
+  // /* Start scheduler */
+  // osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  vTaskStartScheduler();
   while (1)
   {
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -537,7 +556,7 @@ static void MX_SPI3_Init(void)
   /* SPI3 parameter configuration*/
   hspi3.Instance = SPI3;
   hspi3.Init.Mode = SPI_MODE_MASTER;
-  hspi3.Init.Direction = SPI_DIRECTION_1LINE;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
   hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi3.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi3.Init.CLKPhase = SPI_PHASE_2EDGE;
