@@ -26,10 +26,12 @@
 #include <stdio.h>
 #include <string.h>
 #include "FATFS_SD.h"
-#include "LCD.h"
+// #include "LCD.h"
 #include "CAN.h"
 #include "stdio.h"
 #include "FreeRTOS.h"
+#include "I2C_LCD.h"
+
 
 /* USER CODE END Includes */
 
@@ -53,10 +55,11 @@ ADC_HandleTypeDef hadc1;
 
 CAN_HandleTypeDef hcan1;
 
+I2C_HandleTypeDef hi2c1;
+
 UART_HandleTypeDef hlpuart1;
 
 SPI_HandleTypeDef hspi1;
-SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim2;
 
@@ -73,13 +76,20 @@ static void MX_SPI1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_LPUART1_UART_Init(void);
 static void MX_TIM2_Init(void);
-static void MX_SPI3_Init(void);
+static void MX_I2C1_Init(void);
 void StartDefaultTask(void const * argument);
+#define MyI2C_LCD I2C_LCD_1
 
 /* USER CODE BEGIN PFP */
 
 static void SD_Card_Test(void);
 extern volatile uint16_t Timer1, Timer2;
+
+uint8_t Buffer[25] = {0};
+uint8_t Space[] = " - ";
+uint8_t StartMSG[] = "Starting I2C Scanning: \r\n";
+uint8_t EndMSG[] = "Done! \r\n\r\n";
+
 
 /* USER CODE END PFP */
 
@@ -104,23 +114,36 @@ void vStartSdTask(void *pvparameters)
 
 void vLCD_Task(void *pvparameters)
 {
-  osDelay(1000);  /* wait for SPI3 to be initialized */
   printf("LCD task started\r\n");
-  LCD_Handle lcd;
-  LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
-  LCD_Clear(&lcd);
-  osDelay(100);
-  LCD_Clear(&lcd);
-  LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
+  // LCD_Handle lcd;
+  // LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
+  // LCD_Clear(&lcd);
+  // osDelay(100);
+  // LCD_Clear(&lcd);
+  // LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
   printf("LCD WRITES\r\n");
-  osDelay(500);
-  LCD_PrintStrAt(&lcd,0,2, "speed:");
-  for (;;)
-  {
-    uint8_t dummy_data = 0xAA; // 0b10101010 gives clean clock/data pulses
-    HAL_SPI_Transmit(&hspi3, &dummy_data, 1, HAL_MAX_DELAY);
-    // osDelay(1000);         /* idle once the test is done */
-  }
+  // osDelay(500);
+  // LCD_PrintStrAt(&lcd,0,2, "speed:");
+  // I2C_LCD_Init();
+  // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 0, HeartChar);
+  // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 1, SmileyFaceChar);
+  // I2C_LCD_SetCursor( 0, 0);
+  // I2C_LCD_WriteString( "Hello world");
+  // I2C_LCD_SetCursor( 0, 1);
+  // I2C_LCD_WriteString( "I2C LCD ");
+  // I2C_LCD_PrintCustomChar(MyI2C_LCD, 1);
+  // I2C_LCD_PrintCustomChar(MyI2C_LCD, 0);
+  I2C_LCD_Init(MyI2C_LCD);
+  I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
+  I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
+  I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
+  I2C_LCD_WriteString(MyI2C_LCD, "I2C LCD ");
+
+
+    printf("LCD WRITES\r\n");
+
+
+  vTaskDelete(NULL);
 }
 
 
@@ -271,21 +294,23 @@ int main(void)
   MX_ADC1_Init();
   MX_LPUART1_UART_Init();
   MX_TIM2_Init();
-  MX_SPI3_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
-  
-
   // LCD_PrintStrAt(&lcd,0,2, "speed:");
-  //xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
-  BaseType_t ok = xTaskCreate(vStartSdTask, "SD", 2048, NULL, 5, &StartSdTask);  /* 2048 words = 8 KB */
-  if (ok != pdPASS)
+  // xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
+  // BaseType_t ok = xTaskCreate(vStartSdTask, "SD", 2048, NULL, 5, &StartSdTask);  /* 2048 words = 8 KB */
+  // if (ok != pdPASS)
+  // {
+  //   printf("SD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
+  //   Error_Handler();
+  // }
+  BaseType_t okLCD = xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
+    if (okLCD != pdPASS)
   {
-    printf("SD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
+    printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
     Error_Handler();
   }
-  xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
-
 
   /* USER CODE END 2 */
 
@@ -482,6 +507,54 @@ static void MX_CAN1_Init(void)
 }
 
 /**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x00B07CB4;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
   * @brief LPUART1 Initialization Function
   * @param None
   * @retval None
@@ -556,46 +629,6 @@ static void MX_SPI1_Init(void)
 }
 
 /**
-  * @brief SPI3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI3_Init(void)
-{
-
-  /* USER CODE BEGIN SPI3_Init 0 */
-
-  /* USER CODE END SPI3_Init 0 */
-
-  /* USER CODE BEGIN SPI3_Init 1 */
-
-  /* USER CODE END SPI3_Init 1 */
-  /* SPI3 parameter configuration*/
-  hspi3.Instance = SPI3;
-  hspi3.Init.Mode = SPI_MODE_MASTER;
-  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi3.Init.CLKPolarity = SPI_POLARITY_HIGH;
-  hspi3.Init.CLKPhase = SPI_PHASE_2EDGE;
-  hspi3.Init.NSS = SPI_NSS_SOFT;
-  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
-  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi3.Init.CRCPolynomial = 7;
-  hspi3.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
-  if (HAL_SPI_Init(&hspi3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI3_Init 2 */
-
-  /* USER CODE END SPI3_Init 2 */
-
-}
-
-/**
   * @brief TIM2 Initialization Function
   * @param None
   * @retval None
@@ -665,7 +698,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4|GPIO_PIN_6, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PA4 */
   GPIO_InitStruct.Pin = GPIO_PIN_4;
@@ -682,11 +715,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF3_USART2;
   HAL_GPIO_Init(VCP_RX_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB4 PB6 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_6;
+  /*Configure GPIO pin : PB4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
