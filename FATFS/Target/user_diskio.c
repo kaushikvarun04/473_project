@@ -35,7 +35,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include <string.h>
 #include "ff_gen_drv.h"
-#include "../../Middlewares/Third_Party/FatFs/src/FATFS_SD.h"
+#include "../../Core/Src/FATFS_SD.h"
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/

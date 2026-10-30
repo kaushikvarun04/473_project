@@ -1,4 +1,4 @@
-1/* USER CODE BEGIN Header */
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 #include "FATFS_SD.h"
 #include "LCD.h"
 #include "CAN.h"
@@ -58,8 +59,6 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim2;
-extern volatile uint16_t Timer1, Timer2;   /* defined in fatfs_sd.c */
-char TxBuffer[250];
 
 osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
@@ -78,7 +77,9 @@ static void MX_SPI3_Init(void);
 void StartDefaultTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
+
 static void SD_Card_Test(void);
+extern volatile uint16_t Timer1, Timer2;
 
 /* USER CODE END PFP */
 
@@ -93,6 +94,7 @@ void vStartSdTask(void *pvparameters)
   printf("SD task started\r\n");
 
   SD_Card_Test();          /* one-shot test for now */
+  printf("SD task high water mark: %lu\r\n", uxTaskGetStackHighWaterMark(NULL));  
 
   for (;;)
   {
@@ -107,12 +109,17 @@ void vLCD_Task(void *pvparameters)
   LCD_Handle lcd;
   LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
   LCD_Clear(&lcd);
+  osDelay(100);
+  LCD_Clear(&lcd);
   LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
+  printf("LCD WRITES\r\n");
   osDelay(500);
   LCD_PrintStrAt(&lcd,0,2, "speed:");
   for (;;)
   {
-    osDelay(1000);         /* idle once the test is done */
+    uint8_t dummy_data = 0xAA; // 0b10101010 gives clean clock/data pulses
+    HAL_SPI_Transmit(&hspi3, &dummy_data, 1, HAL_MAX_DELAY);
+    // osDelay(1000);         /* idle once the test is done */
   }
 }
 
@@ -121,16 +128,19 @@ void vLCD_Task(void *pvparameters)
 static void SD_Card_Test(void)
 {
   printf("\r\n------------------[ SD Card Test ]--------------------\r\n");
-  FATFS FatFs;
-  FIL Fil;
+  static FATFS FatFs;
+  static FIL Fil;
   FRESULT FR_Status;
   FATFS *FS_Ptr;
   UINT RWC, WWC; // Read/Write Word Counter
   DWORD FreeClusters;
   uint32_t TotalSize, FreeSpace;
   char RW_Buffer[200];
+    printf("0BEFORE DO LOOP \r\n");
+
   do
   {
+    printf("INSIDE DO LOOP..\r\n");
     //------------------[ Mount The SD Card ]--------------------
     FR_Status = f_mount(&FatFs, "", 1);
     if (FR_Status != FR_OK)
@@ -149,7 +159,7 @@ static void SD_Card_Test(void)
     printf("1Free SD Card Space: %lu Bytes\r\n\n", FreeSpace);
     //------------------[ Open A Text File For Write & Write Data ]--------------------
     //Open the file
-    FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ | FA_CREATE_ALWAYS);
+    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_WRITE | FA_READ | FA_CREATE_ALWAYS);
     if(FR_Status != FR_OK)
     {
 
@@ -167,7 +177,7 @@ static void SD_Card_Test(void)
     f_close(&Fil);
     //------------------[ Open A Text File For Read & Read Its Data ]--------------------
     // Open The File
-    FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_READ);
+    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_READ);
     if(FR_Status != FR_OK)
     {
       printf("1Error! While Opening (TextFileWrite.txt) File For Read.. \r\n");
@@ -188,20 +198,19 @@ static void SD_Card_Test(void)
 
     //------------------[ Open An Existing Text File, Update Its Content, Read It Back ]--------------------
     // (1) Open The Existing File For Write (Update)
-    FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_OPEN_EXISTING | FA_WRITE);
+    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_OPEN_EXISTING | FA_WRITE);
     FR_Status = f_lseek(&Fil, f_size(&Fil)); // Move The File Pointer To The EOF (End-Of-File)
     if(FR_Status != FR_OK)
     {
       printf("1Error! While Opening (TextFileWrite.txt) File For Update.. \r\n");
-      printf(TxBuffer);
       break;
     }
     // (2) Write New Line of Text Data To The File
-    FR_Status = f_puts("This New Line Was Added During Update!\r\n", &Fil);
+    FR_Status = f_puts("1.2 This New Line Was Added During Update!\r\n", &Fil);
     f_close(&Fil);
     memset(RW_Buffer,'\0',sizeof(RW_Buffer)); // Clear The Buffer
     // (3) Read The Contents of The Text File After The Update
-    FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_READ); // Open The File For Read
+    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_READ); // Open The File For Read
     f_read(&Fil, RW_Buffer, f_size(&Fil), &RWC);
     printf("1Data Read From (TextFileWrite.txt) After Update:%s", RW_Buffer);
     f_close(&Fil);
@@ -265,9 +274,17 @@ int main(void)
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
+  
 
-  xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
-  xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 6 , &LCD_Task);
+  // LCD_PrintStrAt(&lcd,0,2, "speed:");
+  //xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
+  BaseType_t ok = xTaskCreate(vStartSdTask, "SD", 2048, NULL, 5, &StartSdTask);  /* 2048 words = 8 KB */
+  if (ok != pdPASS)
+  {
+    printf("SD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
+  xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
 
 
   /* USER CODE END 2 */
@@ -293,11 +310,11 @@ int main(void)
   // osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
   // defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
-  // /* USER CODE BEGIN RTOS_THREADS */
+  /* USER CODE BEGIN RTOS_THREADS */
   
 
   // // /* add threads, ... */
-  // /* USER CODE END RTOS_THREADS */
+  /* USER CODE END RTOS_THREADS */
 
   // /* Initialize leds */
   // BSP_LED_Init(LED_GREEN);

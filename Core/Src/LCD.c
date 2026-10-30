@@ -6,7 +6,16 @@ static void sendByte(LCD_Handle *lcd, uint8_t value, bool isData)
 {
     HAL_GPIO_WritePin(lcd->rs_port, lcd->rs_pin, isData ? GPIO_PIN_SET : GPIO_PIN_RESET);
     HAL_GPIO_WritePin(lcd->cs_port, lcd->cs_pin, GPIO_PIN_RESET);
-    HAL_SPI_Transmit(lcd->hspi, &value, 1, HAL_MAX_DELAY);
+    //HAL_SPI_Transmit(lcd->hspi, &value, 1, HAL_MAX_DELAY);
+        HAL_StatusTypeDef st = HAL_SPI_Transmit(lcd->hspi, &value, 1, 100);
+if (st != HAL_OK) {
+    printf("SPI fail: st=%d state=%d err=0x%lx\r\n",
+           st, lcd->hspi->State, lcd->hspi->ErrorCode);
+}
+//     if (st != HAL_OK) {
+//     printf("SPI err %d, state=%d, errcode=0x%lx\r\n",
+//            st, lcd->hspi->State, lcd->hspi->ErrorCode);
+// }
     HAL_GPIO_WritePin(lcd->cs_port, lcd->cs_pin, GPIO_PIN_SET);
 }
 
@@ -22,49 +31,31 @@ void LCD_Init(LCD_Handle *lcd, SPI_HandleTypeDef *hspi,
     lcd->cs_pin = cs_pin;
     lcd->rs_port = rs_port;
     lcd->rs_pin = rs_pin;
-    printf("Initializing LCD...\r\n");
+
+
     HAL_GPIO_WritePin(cs_port, cs_pin, GPIO_PIN_SET);   /* CSB idle HIGH */
+    HAL_Delay(50);                                      /* power-up settle */
 
-    // HAL_Delay(50);              /* > 40 ms after VDD stable */
-
-    // sendCommand(lcd, 0x38);     /* 8-bit, 2-line (20x4), 5x8 font */
-    // HAL_Delay(1);
-
-    // sendCommand(lcd, 0x0C);     /* Display ON, cursor OFF, blink OFF */
-    // HAL_Delay(1);
-
-    // sendCommand(lcd, 0x01);     /* Clear display */
-    // HAL_Delay(12);
-
-    // sendCommand(lcd, 0x06);     /* Entry mode: increment, no shift */
-    // HAL_Delay(1);
-
-    sendCommand(lcd, 0x3A);   /* Function set: 8-bit, N=1, RE=1 (extended set) */
-    HAL_Delay(1);
-    sendCommand(lcd, 0x09);   /* Extended function set: NW=1 (4-line mode) */
-    HAL_Delay(1);
-    sendCommand(lcd, 0x38);   /* Function set: 8-bit, N=1, RE=0 (back to normal set) */
-    HAL_Delay(1);
-
-    sendCommand(lcd, 0x0C);   /* Display ON */
-    HAL_Delay(1);
+    sendCommand(lcd, 0x38);   /* Function set: 8-bit, N=1 (gives 4 rows at 20 cols) */
+    HAL_Delay(2);
+    sendCommand(lcd, 0x0C);   /* Display ON, cursor off, blink off */
+    HAL_Delay(2);
     sendCommand(lcd, 0x01);   /* Clear */
-    HAL_Delay(12);
-    sendCommand(lcd, 0x06);   /* Entry mode */
-    HAL_Delay(1);
-
+    HAL_Delay(5);
+    sendCommand(lcd, 0x06);   /* Entry mode: increment, no shift */
+    HAL_Delay(2);
+    printf("before delay\r\n");
     HAL_Delay(50);
-
+    printf("after delay\r\n");
 
     lcd->displayControl = LCD_DISPLAYON;
-    sendCommand(lcd, LCD_DISPLAYCONTROL | lcd->displayControl);
-    HAL_Delay(1);
 }
 
 void LCD_Clear(LCD_Handle *lcd)
 {
     sendCommand(lcd, LCD_CLEARDISPLAY);
     HAL_Delay(2);
+    printf("LCD cleared\r\n");
 }
 
 void LCD_Display(LCD_Handle *lcd, bool turnOn)
@@ -122,6 +113,7 @@ void LCD_PrintStrAt(LCD_Handle *lcd, uint8_t col, uint8_t row, const char *str)
 /* Prints at most 20 chars, pads the rest with spaces */
 void LCD_PrintLinePadded(LCD_Handle *lcd, uint8_t row, const char *text)
 {
+    printf("STARTING PRINT\r\n");
     LCD_SetCursor(lcd, 0, row);
 
     uint8_t i = 0;
@@ -132,6 +124,7 @@ void LCD_PrintLinePadded(LCD_Handle *lcd, uint8_t row, const char *text)
     for (; i < LCD_COLS; i++) {
         sendData(lcd, ' ');
     }
+    printf("DONE PRINTING\r\n");
 }
 
 void LCD_DisplaySpeed(LCD_Handle *lcd, float speed_mph, bool has_fix)

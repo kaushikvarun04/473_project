@@ -48,5 +48,4 @@ DSTATUS SD_disk_status(BYTE pdrv);
 DRESULT SD_disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count);
 DRESULT SD_disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count);
 DRESULT SD_disk_ioctl(BYTE pdrv, BYTE cmd, void* buff);
-void SD_Card_Test(void);
 #endif /* FATFS_SD_H_ */
