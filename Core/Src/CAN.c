@@ -190,6 +190,38 @@ double decode_physical_signed(uint64_t raw_data, int start, int length,
 /* ------------------------------------------------------------------ */
 /* Analog inputs                                                       */
 /* ------------------------------------------------------------------ */
+static uint8_t throttle_percent_from_adc(uint32_t adc_val)
+{
+    if (adc_val > THROTTLE_ADC_MAX) adc_val = THROTTLE_ADC_MAX;
+    if (adc_val < THROTTLE_ADC_MIN) adc_val = THROTTLE_ADC_MIN;
+
+    return (uint8_t)((THROTTLE_ADC_MAX - adc_val) * 100u /
+                     (THROTTLE_ADC_MAX - THROTTLE_ADC_MIN));
+}
+
+HAL_StatusTypeDef Read_ADC_Throttle_Percent(ADC_HandleTypeDef *hadc,
+                                            uint8_t *percent)
+{
+    if (hadc == NULL || percent == NULL) return HAL_ERROR;
+
+    HAL_StatusTypeDef status = HAL_ADC_Start(hadc);
+    if (status != HAL_OK) return status;
+
+    status = HAL_ADC_PollForConversion(hadc, 10);
+    if (status != HAL_OK)
+    {
+        HAL_ADC_Stop(hadc);
+        return status;
+    }
+
+    uint32_t adc_val = HAL_ADC_GetValue(hadc);
+    status = HAL_ADC_Stop(hadc);
+    if (status != HAL_OK) return status;
+
+    *percent = throttle_percent_from_adc(adc_val);
+    return HAL_OK;
+}
+
 uint32_t Read_ADC_Value(ADC_HandleTypeDef *hadc, bool convert)
 {
     uint32_t adc_val = 0;
@@ -201,12 +233,7 @@ uint32_t Read_ADC_Value(ADC_HandleTypeDef *hadc, bool convert)
 
     if (!convert) return adc_val;
 
-    /* Clamp to the sensor's physical range, then map to 0-100 % */
-    if (adc_val > THROTTLE_ADC_MAX) adc_val = THROTTLE_ADC_MAX;
-    if (adc_val < THROTTLE_ADC_MIN) adc_val = THROTTLE_ADC_MIN;
-
-    return (THROTTLE_ADC_MAX - adc_val) * 100u /
-           (THROTTLE_ADC_MAX - THROTTLE_ADC_MIN);
+    return throttle_percent_from_adc(adc_val);
 }
 
 float readTempC(int adc)

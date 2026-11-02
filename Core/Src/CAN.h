@@ -33,6 +33,8 @@
 /* Throttle potentiometer calibration (12-bit ADC, inverted pot) */
 #define THROTTLE_ADC_MIN   370u     /* reading at 100 % throttle */
 #define THROTTLE_ADC_MAX   4095u    /* reading at 0 % throttle   */
+#define THROTTLE_CAN_ID    0x300u   /* Check against the vehicle-wide CAN allocation */
+#define THROTTLE_CAN_PERIOD_MS 100u
 
 /* Thermistor divider constants */
 #define R_FIXED     10000.0f
@@ -103,6 +105,8 @@ double decode_physical_signed(uint64_t raw_data, int start, int length,
 /* Blocking single conversion. If convert is true, returns throttle 0-100 %,
  * otherwise the raw 12-bit value. */
 uint32_t Read_ADC_Value(ADC_HandleTypeDef *hadc, bool convert);
+HAL_StatusTypeDef Read_ADC_Throttle_Percent(ADC_HandleTypeDef *hadc,
+                                            uint8_t *percent);
 
 /* Thermistor temperature in degrees Fahrenheit (NaN if adc is invalid). */
 float readTempC(int adc);

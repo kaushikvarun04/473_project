@@ -30,6 +30,7 @@
 #include "CAN.h"
 #include "stdio.h"
 #include "FreeRTOS.h"
+#include "queue.h"
 #include "I2C_LCD.h"
 
 
@@ -98,6 +99,105 @@ uint8_t EndMSG[] = "Done! \r\n\r\n";
 
 TaskHandle_t StartSdTask = NULL;
 TaskHandle_t LCD_Task = NULL;
+TaskHandle_t ThrottleCanTask = NULL;
+TaskHandle_t CanRxTask = NULL;
+static QueueHandle_t canDisplayQueue = NULL;
+
+static void LCD_WriteRow(uint8_t row, const char *text)
+{
+  char line[21];
+  size_t len = strlen(text);
+
+  if (len > sizeof(line) - 1) len = sizeof(line) - 1;
+  memcpy(line, text, len);
+  memset(&line[len], ' ', sizeof(line) - 1 - len);
+  line[sizeof(line) - 1] = '\0';
+
+  I2C_LCD_SetCursor(MyI2C_LCD, 0, row);
+  I2C_LCD_WriteString(MyI2C_LCD, line);
+}
+
+static void LCD_DisplayCanMessage(const CAN_Message *message)
+{
+  char line[21];
+  char id_type = message->is_extended ? 'E' : 'S';
+  int id_digits = message->is_extended ? 8 : 3;
+  uint32_t id_mask = message->is_extended ? 0x1FFFFFFFu : 0x7FFu;
+
+  snprintf(line, sizeof(line), "%c:%0*lX DLC:%u", id_type, id_digits,
+           (unsigned long)(message->id & id_mask), message->dlc);
+  LCD_WriteRow(0, line);
+
+  for (uint8_t row = 0; row < 2; row++)
+  {
+    char data_line[21];
+    uint8_t first_byte = row * 4;
+    snprintf(data_line, sizeof(data_line), "D%u-%u: ", first_byte,
+             first_byte + 3);
+
+    size_t position = strlen(data_line);
+    for (uint8_t i = first_byte; i < first_byte + 4; i++)
+    {
+      if (i < message->dlc)
+      {
+        snprintf(&data_line[position], sizeof(data_line) - position,
+                 "%02X", message->data[i]);
+      }
+      else
+      {
+        memcpy(&data_line[position], "--", 2);
+      }
+      position += 2;
+      if (i < first_byte + 3) data_line[position++] = ' ';
+    }
+    data_line[position] = '\0';
+    LCD_WriteRow(row + 1, data_line);
+  }
+}
+
+static void vCAN_RxTask(void *pvParameters)
+{
+  (void)pvParameters;
+  CAN_Comm_SetRxTask(xTaskGetCurrentTaskHandle());
+
+  for (;;)
+  {
+    CAN_Message message;
+    while (CAN_Comm_Pop(&message))
+    {
+      /* Keep the receiver draining promptly; the LCD displays the newest frame. */
+      xQueueOverwrite(canDisplayQueue, &message);
+      /* The raw CAN_Message is also the record to pass to a future SD logger. */
+    }
+
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+  }
+}
+
+static void vThrottleCanTask(void *pvParameters)
+{
+  (void)pvParameters;
+
+  for (;;)
+  {
+    uint8_t throttle_percent;
+    HAL_StatusTypeDef status =
+        Read_ADC_Throttle_Percent(&hadc1, &throttle_percent);
+
+    if (status == HAL_OK)
+    {
+      status = CAN_Comm_Send(&hcan1, THROTTLE_CAN_ID, false,
+                             &throttle_percent, 1);
+    }
+
+    if (status != HAL_OK)
+    {
+      printf("Throttle CAN task failed: %d\r\n", (int)status);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(THROTTLE_CAN_PERIOD_MS));
+  }
+}
 
 void vStartSdTask(void *pvparameters)
 {
@@ -114,36 +214,19 @@ void vStartSdTask(void *pvparameters)
 
 void vLCD_Task(void *pvparameters)
 {
-  printf("LCD task started\r\n");
-  // LCD_Handle lcd;
-  // LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
-  // LCD_Clear(&lcd);
-  // osDelay(100);
-  // LCD_Clear(&lcd);
-  // LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
-  printf("LCD WRITES\r\n");
-  // osDelay(500);
-  // LCD_PrintStrAt(&lcd,0,2, "speed:");
-  // I2C_LCD_Init();
-  // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 0, HeartChar);
-  // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 1, SmileyFaceChar);
-  // I2C_LCD_SetCursor( 0, 0);
-  // I2C_LCD_WriteString( "Hello world");
-  // I2C_LCD_SetCursor( 0, 1);
-  // I2C_LCD_WriteString( "I2C LCD ");
-  // I2C_LCD_PrintCustomChar(MyI2C_LCD, 1);
-  // I2C_LCD_PrintCustomChar(MyI2C_LCD, 0);
+  (void)pvparameters;
   I2C_LCD_Init(MyI2C_LCD);
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
-  I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
-  I2C_LCD_WriteString(MyI2C_LCD, "I2C LCD ");
+  LCD_WriteRow(0, "CAN RX waiting");
+  LCD_WriteRow(1, "No frame received");
 
-
-    printf("LCD WRITES\r\n");
-
-
-  vTaskDelete(NULL);
+  for (;;)
+  {
+    CAN_Message message;
+    if (xQueueReceive(canDisplayQueue, &message, portMAX_DELAY) == pdPASS)
+    {
+      LCD_DisplayCanMessage(&message);
+    }
+  }
 }
 
 
@@ -297,6 +380,38 @@ int main(void)
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
+  canDisplayQueue = xQueueCreate(1, sizeof(CAN_Message));
+  if (canDisplayQueue == NULL)
+  {
+    printf("CAN display queue creation failed, free heap = %u\r\n",
+           (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
+
+  if (CAN_Comm_Init(&hcan1) != HAL_OK)
+  {
+    printf("CAN initialization failed\r\n");
+    Error_Handler();
+  }
+
+  BaseType_t okCanRx = xTaskCreate(vCAN_RxTask, "CAN_RX", 512, NULL, 5,
+                                   &CanRxTask);
+  if (okCanRx != pdPASS)
+  {
+    printf("CAN RX task creation failed, free heap = %u\r\n",
+           (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
+
+  BaseType_t okCan = xTaskCreate(vThrottleCanTask, "CAN_TX", 512, NULL, 5,
+                                 &ThrottleCanTask);
+  if (okCan != pdPASS)
+  {
+    printf("Throttle CAN task creation failed, free heap = %u\r\n",
+           (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
+
   // LCD_PrintStrAt(&lcd,0,2, "speed:");
   // xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
   // BaseType_t ok = xTaskCreate(vStartSdTask, "SD", 2048, NULL, 5, &StartSdTask);  /* 2048 words = 8 KB */
