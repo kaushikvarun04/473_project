@@ -116,8 +116,6 @@ void I2C_LCD_Init(uint8_t I2C_LCD_InstanceIndex)
 {
 	// According To Datasheet, We Must Wait At Least 40ms After Power Up Before Interacting With The LCD Module
 	while(HAL_GetTick() < 50);
-    I2C_LCD_InfoParam_g[I2C_LCD_InstanceIndex].DisplayCtrl = LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF;
-    I2C_LCD_InfoParam_g[I2C_LCD_InstanceIndex].BacklightVal = LCD_BACKLIGHT;
     I2C_LCD_Cmd(I2C_LCD_InstanceIndex, 0x30);
     HAL_Delay(5);  // Delay > 4.1ms
     I2C_LCD_Cmd(I2C_LCD_InstanceIndex, 0x30);
@@ -129,6 +127,8 @@ void I2C_LCD_Init(uint8_t I2C_LCD_InstanceIndex)
     I2C_LCD_Cmd(I2C_LCD_InstanceIndex, LCD_FUNCTIONSET | LCD_4BITMODE | LCD_2LINE | LCD_5x8DOTS);
     I2C_LCD_Cmd(I2C_LCD_InstanceIndex, LCD_DISPLAYCONTROL | LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF);
     I2C_LCD_Cmd(I2C_LCD_InstanceIndex, LCD_ENTRYMODESET | LCD_ENTRYLEFT | LCD_ENTRYSHIFTDECREMENT);
+    I2C_LCD_InfoParam_g[I2C_LCD_InstanceIndex].DisplayCtrl = LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF;
+    I2C_LCD_InfoParam_g[I2C_LCD_InstanceIndex].BacklightVal = LCD_BACKLIGHT;
     // Clear the LCD
     I2C_LCD_Clear(I2C_LCD_InstanceIndex);
 }

@@ -3,8 +3,8 @@
  * CAN RX ring buffer, DBC signal decoding, CAN TX helper, throttle ADC and
  * thermistor helpers for the DAQ board (STM32L4 bxCAN + FreeRTOS).
  */
-#ifndef CAN_COMM_H
-#define CAN_COMM_H
+#ifndef CAN_H
+#define CAN_H
 
 #include "main.h"          /* pulls in the HAL (CAN, ADC) headers */
 #include <stdint.h>
@@ -103,6 +103,8 @@ double decode_physical_signed(uint64_t raw_data, int start, int length,
 /* Blocking single conversion. If convert is true, returns throttle 0-100 %,
  * otherwise the raw 12-bit value. */
 uint32_t Read_ADC_Value(ADC_HandleTypeDef *hadc, bool convert);
+
+void handle_message(const CAN_Message *msg);
 
 /* Thermistor temperature in degrees Fahrenheit (NaN if adc is invalid). */
 float readTempC(int adc);

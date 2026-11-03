@@ -6,6 +6,8 @@
 #include "task.h"
 #include <string.h>
 #include <math.h>
+#include <time.h>
+#include <stdio.h>
 
 /* ------------------------------------------------------------------ */
 /* RX ring buffer (ISR = producer, one task = consumer)                */
@@ -217,4 +219,99 @@ float readTempC(int adc)
     float invT = 1.0f / T0 + logf(r / R0) / BETA;
     float tempC = 1.0f / invT - 273.15f;
     return tempC * 9.0f / 5.0f + 32.0f;   /* returns Fahrenheit */
+}
+
+
+void handle_message(const CAN_Message *msg)
+{
+    uint64_t raw_data = CAN_Message_ToU64(msg);
+
+    if (msg->is_extended)
+    {
+        uint32_t base_id = msg->id & 0xFFFFFFC0;
+        uint8_t  node_id = msg->id & 0x3F;
+
+        if (node_id == 1) return;   /* you were ignoring node 1 in every case */
+
+        switch (base_id)
+        {
+        case 117815424: { /* PERIODIC_FRAME_2 */
+            float raw_angle = extract_float32(raw_data, 0);
+            float angle     = extract_float32(raw_data, 32);
+            printf("Node %u | F2 | RawAngle: %ld mrot | Angle: %ld mrot\n",
+                   (unsigned)node_id, (long)(raw_angle * 1000.0f), (long)(angle * 1000.0f));
+            break;
+        }
+        case 117815488: { /* PERIODIC_FRAME_3 */
+            uint32_t ts = (uint32_t)extract_bits(raw_data, 0, 32);
+            float pos   = extract_float32(raw_data, 32);
+            printf("Node %u | F3 | t=%lu ms | Position: %ld mrot\n",
+                   (unsigned)node_id, (unsigned long)ts, (long)(pos * 1000.0f));
+            break;
+        }
+        case 117815552: { /* PERIODIC_FRAME_4 */
+            uint32_t ts = (uint32_t)extract_bits(raw_data, 0, 32);
+            float vel   = extract_float32(raw_data, 32);
+            printf("Node %u | F4 | t=%lu ms | Velocity: %ld mRPM\n",
+                   (unsigned)node_id, (unsigned long)ts, (long)(vel * 1000.0f));
+            break;
+        }
+        default: break;
+        }
+        return;
+    }
+
+    /* Standard IDs: check the valid bit and decode in the same case */
+    switch (msg->id)
+    {
+    case 0x002: /* GPS time */
+        if (extract_bits(raw_data, 0, 1)) {
+            time_t now_gmt = (uint64_t) decode_physical_value(raw_data, 8, 40, TIME_OFFSET, TIME_SCALE);
+            struct tm ts;
+            char buf[80];
+            ts = *localtime(&now_gmt);
+	        strftime(buf, sizeof(buf), "%a %Y-%m-%d %H:%M:%S %Z\n", &ts);
+	         printf("TIME: %s\n", buf);
+        }
+        break;
+
+    case 0x003: /* GPS position */
+        if (extract_bits(raw_data, 0, 1)) {
+            double lat = decode_physical_value(raw_data, 1,  28, LAT_OFFSET,  POS_SCALE);
+            double lon = decode_physical_value(raw_data, 29, 29, LONG_OFFSET, POS_SCALE);
+            printf("GPS position (deg, deg): %f, %f\n", lat, lon);
+        }
+        break;
+
+    // case 0x006: /* GPS distance */
+    //     if (extract_bits(raw_data, 0, 1)) {
+    //         trip_distance  = extract_bits(raw_data, 1, 22);   /* m  */
+    //         total_distance = extract_bits(raw_data, 42, 22);  /* km */
+    //     }
+    //     break;
+
+    case 0x007: /* GPS speed */
+        if (extract_bits(raw_data, 0, 1)) {
+            double v = decode_physical_value(raw_data, 1, 20, 0, SPEED_SCALE);
+            char str[64];
+            //snprintf(str, sizeof str, "%.4f", v);
+            //LCD_PrintStrAt(&lcd, 1, 6, str);
+        }
+        break;
+
+    // case 0x009: /* IMU */
+    //     if (extract_bits(raw_data, 0, 1)) {
+    //         double accel[3], angular[3];
+    //         accel[0]   = decode_physical_value(raw_data, 1,  10, ACCEL_OFFSET,   ACCEL_SCALE);
+    //         accel[1]   = decode_physical_value(raw_data, 11, 10, ACCEL_OFFSET,   ACCEL_SCALE);
+    //         accel[2]   = decode_physical_value(raw_data, 21, 10, ACCEL_OFFSET,   ACCEL_SCALE);
+    //         angular[0] = decode_physical_value(raw_data, 31, 11, ANGULAR_OFFSET, ANGULAR_SCALE);
+    //         angular[1] = decode_physical_value(raw_data, 42, 11, ANGULAR_OFFSET, ANGULAR_SCALE);
+    //         angular[2] = decode_physical_value(raw_data, 53, 11, ANGULAR_OFFSET, ANGULAR_SCALE);
+    //         /* log_imu_data_to_sd(accel, angular); */
+    //     }
+    //     break;
+
+    default: break;
+    }
 }

@@ -98,53 +98,72 @@ uint8_t EndMSG[] = "Done! \r\n\r\n";
 
 TaskHandle_t StartSdTask = NULL;
 TaskHandle_t LCD_Task = NULL;
+TaskHandle_t CAN_Task_Handle = NULL;
 
-void vStartSdTask(void *pvparameters)
+// void vStartSdTask(void *pvparameters)
+// {
+//   printf("SD task started\r\n");
+
+//   SD_Card_Test();          /* one-shot test for now */
+//     // printf("SD task high water mark: %lu\r\n", uxTaskGetStackHighWaterMark(NULL));  
+
+//   for (;;)
+//   {
+//     osDelay(1000);         /* idle once the test is done */
+//   }
+// }
+
+// void vLCD_Task(void *pvparameters)
+// {
+//   printf("LCD task started\r\n");
+//   // LCD_Handle lcd;
+//   // LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
+//   // LCD_Clear(&lcd);
+//   // osDelay(100);
+//   // LCD_Clear(&lcd);
+//   // LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
+//   printf("LCD WRITES\r\n");
+//   // osDelay(500);
+//   // LCD_PrintStrAt(&lcd,0,2, "speed:");
+//   // I2C_LCD_Init();
+//   // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 0, HeartChar);
+//   // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 1, SmileyFaceChar);
+//   // I2C_LCD_SetCursor( 0, 0);
+//   // I2C_LCD_WriteString( "Hello world");
+//   // I2C_LCD_SetCursor( 0, 1);
+//   // I2C_LCD_WriteString( "I2C LCD ");
+//   // I2C_LCD_PrintCustomChar(MyI2C_LCD, 1);
+//   // I2C_LCD_PrintCustomChar(MyI2C_LCD, 0);
+//   I2C_LCD_Init(MyI2C_LCD);
+//   I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
+//   I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
+//   I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
+//   I2C_LCD_WriteString(MyI2C_LCD, "I2C LCD ");
+
+
+//     printf("LCD WRITES\r\n");
+
+
+//   vTaskDelete(NULL);
+// }
+
+
+static TaskHandle_t canRxHandle = NULL;
+
+static void CanRxTask(void *arg)
 {
-  printf("SD task started\r\n");
+  printf("CAN RX task started\r\n");
+    (void)arg;
+    CAN_Message msg;
+    for (;;)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   /* sleep until ISR wakes us */
 
-  SD_Card_Test();          /* one-shot test for now */
-  printf("SD task high water mark: %lu\r\n", uxTaskGetStackHighWaterMark(NULL));  
-
-  for (;;)
-  {
-    osDelay(1000);         /* idle once the test is done */
-  }
+        while (CAN_Comm_Pop(&msg))
+            handle_message(&msg);
+    }
 }
 
-void vLCD_Task(void *pvparameters)
-{
-  printf("LCD task started\r\n");
-  // LCD_Handle lcd;
-  // LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
-  // LCD_Clear(&lcd);
-  // osDelay(100);
-  // LCD_Clear(&lcd);
-  // LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
-  printf("LCD WRITES\r\n");
-  // osDelay(500);
-  // LCD_PrintStrAt(&lcd,0,2, "speed:");
-  // I2C_LCD_Init();
-  // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 0, HeartChar);
-  // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 1, SmileyFaceChar);
-  // I2C_LCD_SetCursor( 0, 0);
-  // I2C_LCD_WriteString( "Hello world");
-  // I2C_LCD_SetCursor( 0, 1);
-  // I2C_LCD_WriteString( "I2C LCD ");
-  // I2C_LCD_PrintCustomChar(MyI2C_LCD, 1);
-  // I2C_LCD_PrintCustomChar(MyI2C_LCD, 0);
-  I2C_LCD_Init(MyI2C_LCD);
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
-  I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
-  I2C_LCD_WriteString(MyI2C_LCD, "I2C LCD ");
-
-
-    printf("LCD WRITES\r\n");
-
-
-  vTaskDelete(NULL);
-}
 
 
 
@@ -289,7 +308,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN1_Init();
-  MX_SPI1_Init();
+  //MX_SPI1_Init();
   MX_FATFS_Init();
   MX_ADC1_Init();
   MX_LPUART1_UART_Init();
@@ -297,6 +316,14 @@ int main(void)
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
+  I2C_LCD_Init(MyI2C_LCD);
+  I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
+  I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
+  I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
+  I2C_LCD_WriteString(MyI2C_LCD, "I2C LCD ");
+      
+
+
   // LCD_PrintStrAt(&lcd,0,2, "speed:");
   // xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
   // BaseType_t ok = xTaskCreate(vStartSdTask, "SD", 2048, NULL, 5, &StartSdTask);  /* 2048 words = 8 KB */
@@ -305,12 +332,19 @@ int main(void)
   //   printf("SD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
   //   Error_Handler();
   // }
-  BaseType_t okLCD = xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
-    if (okLCD != pdPASS)
-  {
-    printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
-    Error_Handler();
-  }
+  // BaseType_t okLCD = xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
+  //   if (okLCD != pdPASS)
+  // {
+  //   printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
+  //   Error_Handler();
+  // }
+  xTaskCreate(CanRxTask, "canrx", 512, NULL, tskIDLE_PRIORITY + 3, &canRxHandle);
+  CAN_Comm_SetRxTask(canRxHandle);
+
+    if (CAN_Comm_Init(&hcan1) != HAL_OK)
+        Error_Handler();
+
+
 
   /* USER CODE END 2 */
 
@@ -345,13 +379,13 @@ int main(void)
   // BSP_LED_Init(LED_GREEN);
 
   // /* Start scheduler */
-  // osKernelStart();
+  osKernelStart();
+
 
   /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  vTaskStartScheduler();
   while (1)
   {
     /* USER CODE END WHILE */
