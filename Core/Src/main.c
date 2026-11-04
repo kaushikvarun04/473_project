@@ -100,8 +100,8 @@ uint8_t EndMSG[] = "Done! \r\n\r\n";
 TaskHandle_t StartSdTask = NULL;
 TaskHandle_t LCD_Task = NULL;
 TaskHandle_t ThrottleCanTask = NULL;
-TaskHandle_t CanRxTask = NULL;
 static QueueHandle_t canDisplayQueue = NULL;
+static QueueHandle_t canLogQueue = NULL;
 
 static void LCD_WriteRow(uint8_t row, const char *text)
 {
@@ -162,6 +162,7 @@ static void vCAN_RxTask(void *pvParameters)
 
   for (;;)
   {
+    printf("Starting CAN RX task!");
     CAN_Message message;
     while (CAN_Comm_Pop(&message))
     {
@@ -177,6 +178,7 @@ static void vCAN_RxTask(void *pvParameters)
 static void vThrottleCanTask(void *pvParameters)
 {
   (void)pvParameters;
+  printf("Throttle CAN task started\r\n");
 
   for (;;)
   {
@@ -249,6 +251,23 @@ TaskHandle_t CAN_Task_Handle = NULL;
 
 
 static TaskHandle_t canRxHandle = NULL;
+static TaskHandle_t throttleTxHandle = NULL;
+
+static void PrintCanFrame(const CAN_Message *msg)
+{
+    printf("RX %c ID=0x%0*lX DLC=%u DATA=",
+           msg->is_extended ? 'E' : 'S',
+           msg->is_extended ? 8 : 3,
+           (unsigned long)msg->id, (unsigned)msg->dlc);
+
+    for (uint8_t i = 0; i < msg->dlc; i++)
+    {
+        printf("%02X%s", (unsigned)msg->data[i],
+               (i + 1u < msg->dlc) ? " " : "");
+    }
+
+    printf("\r\n");
+}
 
 static void CanRxTask(void *arg)
 {
@@ -260,7 +279,10 @@ static void CanRxTask(void *arg)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   /* sleep until ISR wakes us */
 
         while (CAN_Comm_Pop(&msg))
+        {
+            PrintCanFrame(&msg);  /* Temporary raw-frame diagnostic */
             handle_message(&msg);
+        }
     }
 }
 
@@ -416,6 +438,15 @@ int main(void)
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
+  canLogQueue = xQueueCreate(CAN_LOG_QUEUE_LENGTH, CAN_LOG_ROW_SIZE);
+  if (canLogQueue == NULL)
+  {
+    printf("CAN log queue creation failed, free heap = %u\r\n",
+           (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
+  CAN_Comm_SetLogQueue(canLogQueue);
+
   I2C_LCD_Init(MyI2C_LCD);
   I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
   I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
@@ -443,7 +474,15 @@ int main(void)
 
     if (CAN_Comm_Init(&hcan1) != HAL_OK)
         Error_Handler();
-
+    BaseType_t throttleTaskStatus =
+        xTaskCreate(vThrottleCanTask, "throttleTX", 1024, NULL,
+                    tskIDLE_PRIORITY + 2, &throttleTxHandle);
+    if (throttleTaskStatus != pdPASS)
+    {
+      printf("Throttle CAN task creation failed, free heap = %u\r\n",
+             (unsigned)xPortGetFreeHeapSize());
+      Error_Handler();
+    }
 
 
   /* USER CODE END 2 */

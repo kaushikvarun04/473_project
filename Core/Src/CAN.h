@@ -7,6 +7,8 @@
 #define CAN_H
 
 #include "main.h"          /* pulls in the HAL (CAN, ADC) headers */
+#include "FreeRTOS.h"
+#include "queue.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -14,6 +16,10 @@
 /* Configuration                                                       */
 /* ------------------------------------------------------------------ */
 #define QUEUE_SIZE      64          /* RX ring buffer depth (frames)   */
+#define CAN_LOG_ROW_SIZE 128
+#define CAN_LOG_QUEUE_LENGTH 16
+#define CAN_LOG_CSV_HEADER \
+    "uptime_ms,format,id,message,valid,node_id,signal1,signal1_value,signal2,signal2_value\r\n"
 
 /* CAN data decoding constants from the provided DBC file */
 #define TIME_SCALE      0.001
@@ -72,6 +78,15 @@ bool CAN_Comm_Pop(CAN_Message *out);
 
 /* Number of frames dropped because the ring buffer was full. */
 uint32_t CAN_Comm_GetDropCount(void);
+
+/* Register a queue whose item size is CAN_LOG_ROW_SIZE bytes. */
+void CAN_Comm_SetLogQueue(QueueHandle_t log_queue);
+
+/* Read one formatted CSV row into a CAN_LOG_ROW_SIZE-byte buffer. */
+bool CAN_Comm_ReadLogRow(char row[CAN_LOG_ROW_SIZE], TickType_t wait_ticks);
+
+/* Rows dropped because the log queue was unavailable, full, or too small. */
+uint32_t CAN_Comm_GetLogQueueDropCount(void);
 
 /* Send a frame (standard or extended ID). Returns HAL_BUSY if all three
  * TX mailboxes are full. Call only from the CAN TX task. */

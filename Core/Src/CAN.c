@@ -8,6 +8,7 @@
 #include <math.h>
 #include <time.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 /* ------------------------------------------------------------------ */
 /* RX ring buffer (ISR = producer, one task = consumer)                */
@@ -16,8 +17,59 @@ static CAN_Message can_queue[QUEUE_SIZE];
 static volatile uint32_t write_index = 0;   /* written only by the ISR  */
 static volatile uint32_t read_index  = 0;   /* written only by the task */
 static volatile uint32_t drop_count  = 0;
+static volatile uint32_t log_queue_drop_count = 0;
 
 static TaskHandle_t rx_task = NULL;
+static QueueHandle_t log_queue = NULL;
+
+static void queue_log_row(const char *format, ...)
+{
+    char row[CAN_LOG_ROW_SIZE] = {0};
+    va_list args;
+    va_start(args, format);
+    int length = vsnprintf(row, sizeof row, format, args);
+    va_end(args);
+
+    if (length < 0 || length >= (int)sizeof row || log_queue == NULL ||
+        xQueueSend(log_queue, row, 0) != pdPASS)
+    {
+        log_queue_drop_count++;
+    }
+}
+
+static void format_milli_value(char *out, size_t out_size, int32_t value)
+{
+    uint32_t magnitude = (value < 0)
+        ? (uint32_t)(-(int64_t)value)
+        : (uint32_t)value;
+
+    snprintf(out, out_size, "%s%lu.%03lu", value < 0 ? "-" : "",
+             (unsigned long)(magnitude / 1000u),
+             (unsigned long)(magnitude % 1000u));
+}
+
+static void format_microdegrees(char *out, size_t out_size, int32_t value)
+{
+    uint32_t magnitude = (value < 0)
+        ? (uint32_t)(-(int64_t)value)
+        : (uint32_t)value;
+
+    snprintf(out, out_size, "%s%lu.%06lu", value < 0 ? "-" : "",
+             (unsigned long)(magnitude / 1000000u),
+             (unsigned long)(magnitude % 1000000u));
+}
+
+static void format_float_milli(char *out, size_t out_size, float value)
+{
+    double scaled = (double)value * 1000.0;
+    if (!isfinite(value) || scaled > INT32_MAX || scaled < INT32_MIN)
+    {
+        snprintf(out, out_size, "NaN");
+        return;
+    }
+
+    format_milli_value(out, out_size, (int32_t)scaled);
+}
 
 HAL_StatusTypeDef CAN_Comm_Init(CAN_HandleTypeDef *hcan)
 {
@@ -106,6 +158,22 @@ bool CAN_Comm_Pop(CAN_Message *out)
 uint32_t CAN_Comm_GetDropCount(void)
 {
     return drop_count;
+}
+
+void CAN_Comm_SetLogQueue(QueueHandle_t queue)
+{
+    log_queue = queue;
+}
+
+bool CAN_Comm_ReadLogRow(char row[CAN_LOG_ROW_SIZE], TickType_t wait_ticks)
+{
+    if (log_queue == NULL || row == NULL) return false;
+    return xQueueReceive(log_queue, row, wait_ticks) == pdPASS;
+}
+
+uint32_t CAN_Comm_GetLogQueueDropCount(void)
+{
+    return log_queue_drop_count;
 }
 
 HAL_StatusTypeDef CAN_Comm_Send(CAN_HandleTypeDef *hcan, uint32_t id,
@@ -265,6 +333,15 @@ void handle_message(const CAN_Message *msg)
         case 117815424: { /* PERIODIC_FRAME_2 */
             float raw_angle = extract_float32(raw_data, 0);
             float angle     = extract_float32(raw_data, 32);
+            char raw_angle_text[16];
+            char angle_text[16];
+            format_float_milli(raw_angle_text, sizeof raw_angle_text, raw_angle);
+            format_float_milli(angle_text, sizeof angle_text, angle);
+            queue_log_row("%lu,EXT,0x%08lX,PERIODIC_FRAME_2,1,%u,"
+                          "raw_angle_mrot,%s,angle_mrot,%s",
+                          (unsigned long)HAL_GetTick(),
+                          (unsigned long)msg->id, (unsigned)node_id,
+                          raw_angle_text, angle_text);
             printf("Node %u | F2 | RawAngle: %ld mrot | Angle: %ld mrot\n",
                    (unsigned)node_id, (long)(raw_angle * 1000.0f), (long)(angle * 1000.0f));
             break;
@@ -272,6 +349,13 @@ void handle_message(const CAN_Message *msg)
         case 117815488: { /* PERIODIC_FRAME_3 */
             uint32_t ts = (uint32_t)extract_bits(raw_data, 0, 32);
             float pos   = extract_float32(raw_data, 32);
+            char position_text[16];
+            format_float_milli(position_text, sizeof position_text, pos);
+            queue_log_row("%lu,EXT,0x%08lX,PERIODIC_FRAME_3,1,%u,"
+                          "device_time_ms,%lu,position_mrot,%s",
+                          (unsigned long)HAL_GetTick(),
+                          (unsigned long)msg->id, (unsigned)node_id,
+                          (unsigned long)ts, position_text);
             printf("Node %u | F3 | t=%lu ms | Position: %ld mrot\n",
                    (unsigned)node_id, (unsigned long)ts, (long)(pos * 1000.0f));
             break;
@@ -279,6 +363,13 @@ void handle_message(const CAN_Message *msg)
         case 117815552: { /* PERIODIC_FRAME_4 */
             uint32_t ts = (uint32_t)extract_bits(raw_data, 0, 32);
             float vel   = extract_float32(raw_data, 32);
+            char velocity_text[16];
+            format_float_milli(velocity_text, sizeof velocity_text, vel);
+            queue_log_row("%lu,EXT,0x%08lX,PERIODIC_FRAME_4,1,%u,"
+                          "device_time_ms,%lu,velocity_mrpm,%s",
+                          (unsigned long)HAL_GetTick(),
+                          (unsigned long)msg->id, (unsigned)node_id,
+                          (unsigned long)ts, velocity_text);
             printf("Node %u | F4 | t=%lu ms | Velocity: %ld mRPM\n",
                    (unsigned)node_id, (unsigned long)ts, (long)(vel * 1000.0f));
             break;
@@ -293,20 +384,44 @@ void handle_message(const CAN_Message *msg)
     {
     case 0x002: /* GPS time */
         if (extract_bits(raw_data, 0, 1)) {
-            time_t now_gmt = (uint64_t) decode_physical_value(raw_data, 8, 40, TIME_OFFSET, TIME_SCALE);
+            uint64_t unix_time_ms = (uint64_t)(TIME_OFFSET * 1000.0) +
+                                    extract_bits(raw_data, 8, 40);
+            queue_log_row("%lu,STD,0x002,GPS_TIME,1,-,unix_time_ms,%llu,,",
+                          (unsigned long)HAL_GetTick(),
+                          (unsigned long long)unix_time_ms);
+            time_t now_gmt = (time_t)(unix_time_ms / 1000u);
             struct tm ts;
             char buf[80];
             ts = *localtime(&now_gmt);
 	        strftime(buf, sizeof(buf), "%a %Y-%m-%d %H:%M:%S %Z\n", &ts);
 	         printf("TIME: %s\n", buf);
+        } else {
+            queue_log_row("%lu,STD,0x002,GPS_TIME,0,-,,,,",
+                          (unsigned long)HAL_GetTick());
         }
         break;
 
     case 0x003: /* GPS position */
         if (extract_bits(raw_data, 0, 1)) {
+            int32_t lat_microdegrees =
+                (int32_t)extract_bits(raw_data, 1, 28) +
+                (int32_t)(LAT_OFFSET * 1000000.0);
+            int32_t lon_microdegrees =
+                (int32_t)extract_bits(raw_data, 29, 29) +
+                (int32_t)(LONG_OFFSET * 1000000.0);
+            char lat_text[16];
+            char lon_text[16];
+            format_microdegrees(lat_text, sizeof lat_text, lat_microdegrees);
+            format_microdegrees(lon_text, sizeof lon_text, lon_microdegrees);
+            queue_log_row("%lu,STD,0x003,GPS_POSITION,1,-,"
+                          "latitude_deg,%s,longitude_deg,%s",
+                          (unsigned long)HAL_GetTick(), lat_text, lon_text);
             double lat = decode_physical_value(raw_data, 1,  28, LAT_OFFSET,  POS_SCALE);
             double lon = decode_physical_value(raw_data, 29, 29, LONG_OFFSET, POS_SCALE);
             printf("GPS position (deg, deg): %f, %f\n", lat, lon);
+        } else {
+            queue_log_row("%lu,STD,0x003,GPS_POSITION,0,-,,,,",
+                          (unsigned long)HAL_GetTick());
         }
         break;
 
@@ -320,9 +435,19 @@ void handle_message(const CAN_Message *msg)
     case 0x007: /* GPS speed */
         if (extract_bits(raw_data, 0, 1)) {
             double v = decode_physical_value(raw_data, 1, 20, 0, SPEED_SCALE);
+            char speed_text[16];
+            format_milli_value(speed_text, sizeof speed_text,
+                               (int32_t)extract_bits(raw_data, 1, 20));
+            queue_log_row("%lu,STD,0x007,GPS_SPEED,1,-,"
+                          "speed_scaled,%s,,",
+                          (unsigned long)HAL_GetTick(), speed_text);
             char str[64];
             //snprintf(str, sizeof str, "%.4f", v);
             //LCD_PrintStrAt(&lcd, 1, 6, str);
+            (void)v;
+        } else {
+            queue_log_row("%lu,STD,0x007,GPS_SPEED,0,-,,,,",
+                          (unsigned long)HAL_GetTick());
         }
         break;
 

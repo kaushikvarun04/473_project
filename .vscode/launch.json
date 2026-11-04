@@ -6,15 +6,16 @@
       "type": "cortex-debug",
       "request": "launch",
       "servertype": "openocd",
+      "gdbPath": "/usr/bin/gdb-multiarch",
+      "objdumpPath": "/usr/bin/arm-none-eabi-objdump",
       "executable": "${workspaceFolder}/build/InverterProject.elf",
-      "device": "STM32L476RG",
+      "device": "STM32L432KC",
       "configFiles": [
         "interface/stlink.cfg",
         "target/stm32l4x.cfg"
       ],
-      "rtos": "FreeRTOS",
       "runToEntryPoint": "main",
-      "showDevDebugOutput": "none",
+      "showDevDebugOutput": "raw",
       "cwd": "${workspaceFolder}"
     }
   ]
