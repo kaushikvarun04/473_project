@@ -318,7 +318,8 @@ float readTempC(int adc)
 
 
 void handle_message(const CAN_Message *msg)
-{
+{   
+    printf("CAN RX MESSAGE: ID=0x%X, DLC=%d, EXT=%d\n", msg->id, msg->dlc, msg->is_extended);
     uint64_t raw_data = CAN_Message_ToU64(msg);
 
     if (msg->is_extended)
@@ -382,6 +383,12 @@ void handle_message(const CAN_Message *msg)
     /* Standard IDs: check the valid bit and decode in the same case */
     switch (msg->id)
     {
+    case 0x300: /*throttle*/
+        if (extract_bits(raw_data, 0, 1)) {
+            uint8_t throttle = (uint8_t)decode_physical_value(raw_data, 8, 8, 0, 1.0f);
+            printf("Throttle: %u%%\n", throttle);
+        }
+        break;
     case 0x002: /* GPS time */
         if (extract_bits(raw_data, 0, 1)) {
             uint64_t unix_time_ms = (uint64_t)(TIME_OFFSET * 1000.0) +

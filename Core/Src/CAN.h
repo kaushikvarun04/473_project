@@ -40,7 +40,7 @@
 #define THROTTLE_ADC_MIN   370u     /* reading at 100 % throttle */
 #define THROTTLE_ADC_MAX   4095u    /* reading at 0 % throttle   */
 #define THROTTLE_CAN_ID    0x300u   /* Check against the vehicle-wide CAN allocation */
-#define THROTTLE_CAN_PERIOD_MS 100u
+#define THROTTLE_CAN_PERIOD_MS 100
 
 /* Thermistor divider constants */
 #define R_FIXED     10000.0f

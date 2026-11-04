@@ -159,7 +159,7 @@ static void vCAN_RxTask(void *pvParameters)
 {
   (void)pvParameters;
   CAN_Comm_SetRxTask(xTaskGetCurrentTaskHandle());
-
+  printf("CAN RX task started\r\n");
   for (;;)
   {
     printf("Starting CAN RX task!");
@@ -167,7 +167,9 @@ static void vCAN_RxTask(void *pvParameters)
     while (CAN_Comm_Pop(&message))
     {
       /* Keep the receiver draining promptly; the LCD displays the newest frame. */
-      xQueueOverwrite(canDisplayQueue, &message);
+      printf("CAN RX PARSING MESSAGE\r\n");
+      // xQueueOverwrite(canDisplayQueue, &message);
+      handle_message(&message);
       /* The raw CAN_Message is also the record to pass to a future SD logger. */
     }
 
@@ -182,14 +184,16 @@ static void vThrottleCanTask(void *pvParameters)
 
   for (;;)
   {
+    printf("Throttle CAN task running\r\n");
     uint8_t throttle_percent;
     HAL_StatusTypeDef status =
         Read_ADC_Throttle_Percent(&hadc1, &throttle_percent);
-
+        printf("Throttle ADC read: %u%%\r\n", throttle_percent);
     if (status == HAL_OK)
     {
       status = CAN_Comm_Send(&hcan1, THROTTLE_CAN_ID, false,
                              &throttle_percent, 1);
+      printf("Throttle CAN task sent: %u%%\r\n", throttle_percent);
     }
 
     if (status != HAL_OK)
@@ -469,7 +473,7 @@ int main(void)
   //   printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
   //   Error_Handler();
   // }
-  xTaskCreate(CanRxTask, "canrx", 512, NULL, tskIDLE_PRIORITY + 3, &canRxHandle);
+  xTaskCreate(vCAN_RxTask, "canrx", 1028, NULL, tskIDLE_PRIORITY + 3, &canRxHandle);
   CAN_Comm_SetRxTask(canRxHandle);
 
     if (CAN_Comm_Init(&hcan1) != HAL_OK)
