@@ -26,12 +26,11 @@
 #include <stdio.h>
 #include <string.h>
 #include "FATFS_SD.h"
-// #include "LCD.h"
+#include "LCD.h"
 #include "CAN.h"
 #include "stdio.h"
 #include "FreeRTOS.h"
 #include "queue.h"
-#include "I2C_LCD.h"
 
 
 /* USER CODE END Includes */
@@ -61,6 +60,7 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef hlpuart1;
 
 SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim2;
 
@@ -77,9 +77,9 @@ static void MX_SPI1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_LPUART1_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_SPI3_Init(void);
 static void MX_I2C1_Init(void);
 void StartDefaultTask(void const * argument);
-#define MyI2C_LCD I2C_LCD_1
 
 /* USER CODE BEGIN PFP */
 
@@ -103,55 +103,25 @@ TaskHandle_t ThrottleCanTask = NULL;
 static QueueHandle_t canDisplayQueue = NULL;
 static QueueHandle_t canLogQueue = NULL;
 
-static void LCD_WriteRow(uint8_t row, const char *text)
+static void vLCD_Task(void *pvParameters)
 {
-  char line[21];
-  size_t len = strlen(text);
+  (void)pvParameters;
+  static LCD_Handle lcd;
+  CAN_Message message;
 
-  if (len > sizeof(line) - 1) len = sizeof(line) - 1;
-  memcpy(line, text, len);
-  memset(&line[len], ' ', sizeof(line) - 1 - len);
-  line[sizeof(line) - 1] = '\0';
+  LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
+  LCD_DisplaySpeed(&lcd, 0.0f, false);
 
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, row);
-  I2C_LCD_WriteString(MyI2C_LCD, line);
-}
-
-static void LCD_DisplayCanMessage(const CAN_Message *message)
-{
-  char line[21];
-  char id_type = message->is_extended ? 'E' : 'S';
-  int id_digits = message->is_extended ? 8 : 3;
-  uint32_t id_mask = message->is_extended ? 0x1FFFFFFFu : 0x7FFu;
-
-  snprintf(line, sizeof(line), "%c:%0*lX DLC:%u", id_type, id_digits,
-           (unsigned long)(message->id & id_mask), message->dlc);
-  LCD_WriteRow(0, line);
-
-  for (uint8_t row = 0; row < 2; row++)
+  for (;;)
   {
-    char data_line[21];
-    uint8_t first_byte = row * 4;
-    snprintf(data_line, sizeof(data_line), "D%u-%u: ", first_byte,
-             first_byte + 3);
-
-    size_t position = strlen(data_line);
-    for (uint8_t i = first_byte; i < first_byte + 4; i++)
+    if (xQueueReceive(canDisplayQueue, &message, portMAX_DELAY) == pdPASS)
     {
-      if (i < message->dlc)
-      {
-        snprintf(&data_line[position], sizeof(data_line) - position,
-                 "%02X", message->data[i]);
-      }
-      else
-      {
-        memcpy(&data_line[position], "--", 2);
-      }
-      position += 2;
-      if (i < first_byte + 3) data_line[position++] = ' ';
+      uint64_t rawData = CAN_Message_ToU64(&message);
+      bool hasFix = extract_bits(rawData, 0, 1) != 0;
+      float speedMph = (float)decode_physical_value(
+          rawData, 1, 20, 0, SPEED_SCALE);
+      LCD_DisplaySpeed(&lcd, speedMph, hasFix);
     }
-    data_line[position] = '\0';
-    LCD_WriteRow(row + 1, data_line);
   }
 }
 
@@ -159,16 +129,19 @@ static void vCAN_RxTask(void *pvParameters)
 {
   (void)pvParameters;
   CAN_Comm_SetRxTask(xTaskGetCurrentTaskHandle());
-  printf("CAN RX task started\r\n");
+  //printf("CAN RX task started\r\n");
   for (;;)
   {
-    printf("Starting CAN RX task!");
+    //printf("Starting CAN RX task!\n");
     CAN_Message message;
     while (CAN_Comm_Pop(&message))
     {
-      /* Keep the receiver draining promptly; the LCD displays the newest frame. */
-      printf("CAN RX PARSING MESSAGE\r\n");
-      // xQueueOverwrite(canDisplayQueue, &message);
+      /* Keep the receiver draining promptly; the LCD only needs GPS speed. */
+      //printf("CAN RX PARSING MESSAGE\n");
+      if (!message.is_extended && message.id == 0x007u && message.dlc >= 3)
+      {
+        xQueueOverwrite(canDisplayQueue, &message);
+      }
       handle_message(&message);
       /* The raw CAN_Message is also the record to pass to a future SD logger. */
     }
@@ -257,6 +230,121 @@ TaskHandle_t CAN_Task_Handle = NULL;
 static TaskHandle_t canRxHandle = NULL;
 static TaskHandle_t throttleTxHandle = NULL;
 
+#define SD_LOG_SYNC_ROWS 16U
+#define SD_LOG_SYNC_INTERVAL_MS 1000U
+
+static void vSdLoggerTask(void *pvParameters)
+{
+  (void)pvParameters;
+  static FIL logFile;
+  char logPath[sizeof(USERPath) + sizeof("CANLOG.CSV")];
+  char row[CAN_LOG_ROW_SIZE + 2];
+  FRESULT result;
+  int pathLength;
+
+  pathLength = snprintf(logPath, sizeof(logPath), "%sCANLOG.CSV", USERPath);
+  if (pathLength < 0 || pathLength >= (int)sizeof(logPath))
+  {
+    printf("SD logger: CSV path is too long\r\n");
+    vTaskDelete(NULL);
+    return;
+  }
+
+  for (;;)
+  {
+    result = f_mount(&USERFatFS, USERPath, 1);
+    if (result == FR_OK)
+    {
+      printf("SD logger: card mounted\r\n");
+      break;
+    }
+
+    printf("SD logger: mount failed (%d), retrying\r\n", (int)result);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+
+  for (;;)
+  {
+    result = f_open(&logFile, logPath, FA_OPEN_APPEND | FA_WRITE);
+    if (result == FR_OK)
+    {
+      break;
+    }
+
+    printf("SD logger: opening %s failed (%d), retrying\r\n",
+           logPath, (int)result);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+
+  if (f_size(&logFile) == 0)
+  {
+    const char header[] = CAN_LOG_CSV_HEADER;
+    UINT bytesWritten = 0;
+    result = f_write(&logFile, header, sizeof(header) - 1, &bytesWritten);
+    if (result != FR_OK || bytesWritten != sizeof(header) - 1)
+    {
+      printf("SD logger: writing CSV header failed (%d, %u bytes)\r\n",
+             (int)result, (unsigned)bytesWritten);
+      f_close(&logFile);
+      vTaskDelete(NULL);
+      return;
+    }
+
+    result = f_sync(&logFile);
+    if (result != FR_OK)
+    {
+      printf("SD logger: syncing CSV header failed (%d)\r\n", (int)result);
+      f_close(&logFile);
+      vTaskDelete(NULL);
+      return;
+    }
+  }
+
+  uint32_t rowsSinceSync = 0;
+  TickType_t lastSync = xTaskGetTickCount();
+
+  for (;;)
+  {
+    if (CAN_Comm_ReadLogRow(row, pdMS_TO_TICKS(100)))
+    {
+      size_t rowLength = strlen(row);
+      row[rowLength] = '\r';
+      row[rowLength + 1] = '\n';
+      UINT writeLength = (UINT)(rowLength + 2);
+      UINT bytesWritten = 0;
+      result = f_write(&logFile, row, writeLength, &bytesWritten);
+      if (result != FR_OK || bytesWritten != writeLength)
+      {
+        printf("SD logger: writing CSV row failed (%d, %u/%u bytes)\r\n",
+               (int)result, (unsigned)bytesWritten, (unsigned)writeLength);
+        f_close(&logFile);
+        vTaskDelete(NULL);
+        return;
+      }
+
+      rowsSinceSync++;
+    }
+
+    TickType_t now = xTaskGetTickCount();
+    if (rowsSinceSync >= SD_LOG_SYNC_ROWS ||
+        (rowsSinceSync > 0 &&
+         now - lastSync >= pdMS_TO_TICKS(SD_LOG_SYNC_INTERVAL_MS)))
+    {
+      result = f_sync(&logFile);
+      if (result != FR_OK)
+      {
+        printf("SD logger: syncing CSV failed (%d)\r\n", (int)result);
+        f_close(&logFile);
+        vTaskDelete(NULL);
+        return;
+      }
+
+      rowsSinceSync = 0;
+      lastSync = now;
+    }
+  }
+}
+
 static void PrintCanFrame(const CAN_Message *msg)
 {
     printf("RX %c ID=0x%0*lX DLC=%u DATA=",
@@ -275,11 +363,12 @@ static void PrintCanFrame(const CAN_Message *msg)
 
 static void CanRxTask(void *arg)
 {
-  printf("CAN RX task started\r\n");
+  printf("CAN RX task started\n");
     (void)arg;
     CAN_Message msg;
     for (;;)
     {
+        printf("RX handling message\n");
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);   /* sleep until ISR wakes us */
 
         while (CAN_Comm_Pop(&msg))
@@ -434,11 +523,12 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_CAN1_Init();
-  //MX_SPI1_Init();
+  MX_SPI1_Init();
   MX_FATFS_Init();
   MX_ADC1_Init();
   MX_LPUART1_UART_Init();
   MX_TIM2_Init();
+  MX_SPI3_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
@@ -450,14 +540,13 @@ int main(void)
     Error_Handler();
   }
   CAN_Comm_SetLogQueue(canLogQueue);
-
-  I2C_LCD_Init(MyI2C_LCD);
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
-  I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
-  I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
-  I2C_LCD_WriteString(MyI2C_LCD, "I2C LCD ");
-      
-
+  canDisplayQueue = xQueueCreate(1, sizeof(CAN_Message));
+  if (canDisplayQueue == NULL)
+  {
+    printf("CAN display queue creation failed, free heap = %u\r\n",
+           (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
 
   // LCD_PrintStrAt(&lcd,0,2, "speed:");
   // xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
@@ -473,20 +562,50 @@ int main(void)
   //   printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
   //   Error_Handler();
   // }
-  xTaskCreate(vCAN_RxTask, "canrx", 1028, NULL, tskIDLE_PRIORITY + 3, &canRxHandle);
+
+
+  // BaseType_t sdTaskStatus =
+  //     xTaskCreate(vSdLoggerTask, "sdLogger", 768, NULL,
+  //                 tskIDLE_PRIORITY + 1, &StartSdTask);
+  // if (sdTaskStatus != pdPASS)
+  // {
+  //   printf("SD logger task creation failed, free heap = %u\r\n",
+  //          (unsigned)xPortGetFreeHeapSize());
+  //   Error_Handler();
+  // }
+
+  BaseType_t lcdTaskStatus =
+      xTaskCreate(vLCD_Task, "lcd", 512, NULL,
+                  tskIDLE_PRIORITY + 1, &LCD_Task);
+  if (lcdTaskStatus != pdPASS)
+  {
+    printf("LCD task creation failed, free heap = %u\r\n",
+           (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
+
+  BaseType_t canRxTaskStatus =
+      xTaskCreate(vCAN_RxTask, "canrx", 1028, NULL,
+                  tskIDLE_PRIORITY + 3, &canRxHandle);
+  if (canRxTaskStatus != pdPASS)
+  {
+    printf("CAN RX task creation failed, free heap = %u\r\n",
+           (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
   CAN_Comm_SetRxTask(canRxHandle);
 
     if (CAN_Comm_Init(&hcan1) != HAL_OK)
         Error_Handler();
-    BaseType_t throttleTaskStatus =
-        xTaskCreate(vThrottleCanTask, "throttleTX", 1024, NULL,
-                    tskIDLE_PRIORITY + 2, &throttleTxHandle);
-    if (throttleTaskStatus != pdPASS)
-    {
-      printf("Throttle CAN task creation failed, free heap = %u\r\n",
-             (unsigned)xPortGetFreeHeapSize());
-      Error_Handler();
-    }
+    // BaseType_t throttleTaskStatus =
+    //     xTaskCreate(vThrottleCanTask, "throttleTX", 1024, NULL,
+    //                 tskIDLE_PRIORITY + 2, &throttleTxHandle);
+    // if (throttleTaskStatus != pdPASS)
+    // {
+    //   printf("Throttle CAN task creation failed, free heap = %u\r\n",
+    //          (unsigned)xPortGetFreeHeapSize());
+    //   Error_Handler();
+    // }
 
 
   /* USER CODE END 2 */
@@ -509,8 +628,8 @@ int main(void)
 
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
-  // osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
-  // defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
+  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   
@@ -518,12 +637,8 @@ int main(void)
   // // /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
-  // /* Initialize leds */
-  // BSP_LED_Init(LED_GREEN);
-
-  // /* Start scheduler */
+  /* Start scheduler */
   osKernelStart();
-
 
   /* We should never get here as control is now taken by the scheduler */
 
@@ -788,7 +903,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -802,6 +917,46 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+  * @brief SPI3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI3_Init(void)
+{
+
+  /* USER CODE BEGIN SPI3_Init 0 */
+
+  /* USER CODE END SPI3_Init 0 */
+
+  /* USER CODE BEGIN SPI3_Init 1 */
+
+  /* USER CODE END SPI3_Init 1 */
+  /* SPI3 parameter configuration*/
+  hspi3.Instance = SPI3;
+  hspi3.Init.Mode = SPI_MODE_MASTER;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi3.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
+  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi3.Init.CRCPolynomial = 7;
+  hspi3.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+  if (HAL_SPI_Init(&hspi3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI3_Init 2 */
+
+  /* USER CODE END SPI3_Init 2 */
 
 }
 
@@ -875,7 +1030,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4|GPIO_PIN_6, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PA4 */
   GPIO_InitStruct.Pin = GPIO_PIN_4;
@@ -892,19 +1047,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF3_USART2;
   HAL_GPIO_Init(VCP_RX_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  /*Configure GPIO pins : PB4 PB6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_6;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  /*Configure GPIO pin : PB7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */

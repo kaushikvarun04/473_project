@@ -44,9 +44,7 @@ void LCD_Init(LCD_Handle *lcd, SPI_HandleTypeDef *hspi,
     HAL_Delay(5);
     sendCommand(lcd, 0x06);   /* Entry mode: increment, no shift */
     HAL_Delay(2);
-    printf("before delay\r\n");
     HAL_Delay(50);
-    printf("after delay\r\n");
 
     lcd->displayControl = LCD_DISPLAYON;
 }
@@ -55,7 +53,6 @@ void LCD_Clear(LCD_Handle *lcd)
 {
     sendCommand(lcd, LCD_CLEARDISPLAY);
     HAL_Delay(2);
-    printf("LCD cleared\r\n");
 }
 
 void LCD_Display(LCD_Handle *lcd, bool turnOn)
@@ -113,7 +110,6 @@ void LCD_PrintStrAt(LCD_Handle *lcd, uint8_t col, uint8_t row, const char *str)
 /* Prints at most 20 chars, pads the rest with spaces */
 void LCD_PrintLinePadded(LCD_Handle *lcd, uint8_t row, const char *text)
 {
-    printf("STARTING PRINT\r\n");
     LCD_SetCursor(lcd, 0, row);
 
     uint8_t i = 0;
@@ -124,22 +120,34 @@ void LCD_PrintLinePadded(LCD_Handle *lcd, uint8_t row, const char *text)
     for (; i < LCD_COLS; i++) {
         sendData(lcd, ' ');
     }
-    printf("DONE PRINTING\r\n");
 }
 
 void LCD_DisplaySpeed(LCD_Handle *lcd, float speed_mph, bool has_fix)
 {
-    LCD_PrintLinePadded(lcd, 0, "== DAQ TELEMETRY ==");   /* 19 chars: fits in 20 */
+    LCD_PrintLinePadded(lcd, 0, "CURRENT SPEED");
 
     if (has_fix) {
         char buf[21];
-        snprintf(buf, sizeof(buf), "SPEED: %5.1f MPH", speed_mph);
+        uint32_t speed_tenths = (uint32_t)(speed_mph * 10.0f + 0.5f);
+        if (speed_tenths > 999999u) speed_tenths = 999999u;
+
+        memcpy(buf, "SPEED: ", 7);
+        size_t position = 7;
+        uint32_t whole = speed_tenths / 10u;
+        uint32_t divisor = 10000u;
+        while (divisor > 1u && whole < divisor) divisor /= 10u;
+        do {
+            buf[position++] = (char)('0' + (whole / divisor) % 10u);
+            divisor /= 10u;
+        } while (divisor > 0u);
+        buf[position++] = '.';
+        buf[position++] = (char)('0' + speed_tenths % 10u);
+        memcpy(&buf[position], " MPH", sizeof(" MPH"));
         LCD_PrintLinePadded(lcd, 1, buf);
-        LCD_PrintLinePadded(lcd, 2, "GPS FIX: ACTIVE");
     } else {
-        LCD_PrintLinePadded(lcd, 1, "SPEED:   ---.- MPH");
-        LCD_PrintLinePadded(lcd, 2, "GPS FIX: SEARCHING..");
+        LCD_PrintLinePadded(lcd, 1, "SPEED: WAITING");
     }
 
-    LCD_PrintLinePadded(lcd, 3, "STATUS: LOGGING...");
+    LCD_PrintLinePadded(lcd, 2, "");
+    LCD_PrintLinePadded(lcd, 3, "");
 }

@@ -4,6 +4,7 @@
 #include "CAN.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include <stdbool.h>
 #include <string.h>
 #include <math.h>
 #include <time.h>
@@ -319,7 +320,11 @@ float readTempC(int adc)
 
 void handle_message(const CAN_Message *msg)
 {   
-    printf("CAN RX MESSAGE: ID=0x%X, DLC=%d, EXT=%d\n", msg->id, msg->dlc, msg->is_extended);
+    //printf("CAN FIFO0 RX: ID=0x%0*lX, DLC=%u, EXT=%u\r\n",
+           msg->is_extended ? 8 : 3,
+           (unsigned long)msg->id,
+           (unsigned)msg->dlc,
+           (unsigned)msg->is_extended);
     uint64_t raw_data = CAN_Message_ToU64(msg);
 
     if (msg->is_extended)
@@ -389,27 +394,27 @@ void handle_message(const CAN_Message *msg)
             printf("Throttle: %u%%\n", throttle);
         }
         break;
-    case 0x002: /* GPS time */
-        if (extract_bits(raw_data, 0, 1)) {
-            uint64_t unix_time_ms = (uint64_t)(TIME_OFFSET * 1000.0) +
-                                    extract_bits(raw_data, 8, 40);
-            queue_log_row("%lu,STD,0x002,GPS_TIME,1,-,unix_time_ms,%llu,,",
-                          (unsigned long)HAL_GetTick(),
-                          (unsigned long long)unix_time_ms);
-            time_t now_gmt = (time_t)(unix_time_ms / 1000u);
-            struct tm ts;
-            char buf[80];
-            ts = *localtime(&now_gmt);
-	        strftime(buf, sizeof(buf), "%a %Y-%m-%d %H:%M:%S %Z\n", &ts);
-	         printf("TIME: %s\n", buf);
-        } else {
-            queue_log_row("%lu,STD,0x002,GPS_TIME,0,-,,,,",
-                          (unsigned long)HAL_GetTick());
-        }
-        break;
+    // case 0x002: /* GPS time */
+    //     if (extract_bits(raw_data, 0, 1)) {
+    //         uint64_t unix_time_ms = (uint64_t)(TIME_OFFSET * 1000.0) +
+    //                                 extract_bits(raw_data, 8, 40);
+    //         queue_log_row("%lu,STD,0x002,GPS_TIME,1,-,unix_time_ms,%llu,,",
+    //                       (unsigned long)HAL_GetTick(),
+    //                       (unsigned long long)unix_time_ms);
+    //         time_t now_gmt = (time_t)(unix_time_ms / 1000u);
+    //         struct tm ts;
+    //         char buf[80];
+    //         ts = *localtime(&now_gmt);
+	//         strftime(buf, sizeof(buf), "%a %Y-%m-%d %H:%M:%S %Z\n", &ts);
+	//          printf("TIME: %s\n", buf);
+    //     } else {
+    //         queue_log_row("%lu,STD,0x002,GPS_TIME,0,-,,,,",
+    //                       (unsigned long)HAL_GetTick());
+    //     }
+    //     break;
 
     case 0x003: /* GPS position */
-        if (extract_bits(raw_data, 0, 1)) {
+        if (extract_bits(raw_data, 0, 1) || true) {
             int32_t lat_microdegrees =
                 (int32_t)extract_bits(raw_data, 1, 28) +
                 (int32_t)(LAT_OFFSET * 1000000.0);
