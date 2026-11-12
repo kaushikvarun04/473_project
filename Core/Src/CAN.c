@@ -320,11 +320,6 @@ float readTempC(int adc)
 
 void handle_message(const CAN_Message *msg)
 {   
-    //printf("CAN FIFO0 RX: ID=0x%0*lX, DLC=%u, EXT=%u\r\n",
-           msg->is_extended ? 8 : 3,
-           (unsigned long)msg->id,
-           (unsigned)msg->dlc,
-           (unsigned)msg->is_extended);
     uint64_t raw_data = CAN_Message_ToU64(msg);
 
     if (msg->is_extended)
@@ -348,8 +343,6 @@ void handle_message(const CAN_Message *msg)
                           (unsigned long)HAL_GetTick(),
                           (unsigned long)msg->id, (unsigned)node_id,
                           raw_angle_text, angle_text);
-            printf("Node %u | F2 | RawAngle: %ld mrot | Angle: %ld mrot\n",
-                   (unsigned)node_id, (long)(raw_angle * 1000.0f), (long)(angle * 1000.0f));
             break;
         }
         case 117815488: { /* PERIODIC_FRAME_3 */
@@ -362,8 +355,6 @@ void handle_message(const CAN_Message *msg)
                           (unsigned long)HAL_GetTick(),
                           (unsigned long)msg->id, (unsigned)node_id,
                           (unsigned long)ts, position_text);
-            printf("Node %u | F3 | t=%lu ms | Position: %ld mrot\n",
-                   (unsigned)node_id, (unsigned long)ts, (long)(pos * 1000.0f));
             break;
         }
         case 117815552: { /* PERIODIC_FRAME_4 */
@@ -376,8 +367,6 @@ void handle_message(const CAN_Message *msg)
                           (unsigned long)HAL_GetTick(),
                           (unsigned long)msg->id, (unsigned)node_id,
                           (unsigned long)ts, velocity_text);
-            printf("Node %u | F4 | t=%lu ms | Velocity: %ld mRPM\n",
-                   (unsigned)node_id, (unsigned long)ts, (long)(vel * 1000.0f));
             break;
         }
         default: break;
@@ -394,24 +383,24 @@ void handle_message(const CAN_Message *msg)
             printf("Throttle: %u%%\n", throttle);
         }
         break;
-    // case 0x002: /* GPS time */
-    //     if (extract_bits(raw_data, 0, 1)) {
-    //         uint64_t unix_time_ms = (uint64_t)(TIME_OFFSET * 1000.0) +
-    //                                 extract_bits(raw_data, 8, 40);
-    //         queue_log_row("%lu,STD,0x002,GPS_TIME,1,-,unix_time_ms,%llu,,",
-    //                       (unsigned long)HAL_GetTick(),
-    //                       (unsigned long long)unix_time_ms);
-    //         time_t now_gmt = (time_t)(unix_time_ms / 1000u);
-    //         struct tm ts;
-    //         char buf[80];
-    //         ts = *localtime(&now_gmt);
-	//         strftime(buf, sizeof(buf), "%a %Y-%m-%d %H:%M:%S %Z\n", &ts);
-	//          printf("TIME: %s\n", buf);
-    //     } else {
-    //         queue_log_row("%lu,STD,0x002,GPS_TIME,0,-,,,,",
-    //                       (unsigned long)HAL_GetTick());
-    //     }
-    //     break;
+    case 0x002: /* GPS time */
+        if (extract_bits(raw_data, 0, 1)) {
+            uint64_t unix_time_ms = (uint64_t)(TIME_OFFSET * 1000.0) +
+                                    extract_bits(raw_data, 8, 40);
+            queue_log_row("%lu,STD,0x002,GPS_TIME,1,-,unix_time_ms,%llu,,",
+                          (unsigned long)HAL_GetTick(),
+                          (unsigned long long)unix_time_ms);
+            time_t now_gmt = (time_t)(unix_time_ms / 1000u);
+            struct tm ts;
+            char buf[80];
+            ts = *localtime(&now_gmt);
+	        strftime(buf, sizeof(buf), "%a %Y-%m-%d %H:%M:%S %Z\n", &ts);
+	         printf("TIME: %s\n", buf);
+        } else {
+            queue_log_row("%lu,STD,0x002,GPS_TIME,0,-,,,,",
+                          (unsigned long)HAL_GetTick());
+        }
+        break;
 
     case 0x003: /* GPS position */
         if (extract_bits(raw_data, 0, 1) || true) {
@@ -446,20 +435,17 @@ void handle_message(const CAN_Message *msg)
 
     case 0x007: /* GPS speed */
         if (extract_bits(raw_data, 0, 1)) {
-            double v = decode_physical_value(raw_data, 1, 20, 0, SPEED_SCALE);
             char speed_text[16];
             format_milli_value(speed_text, sizeof speed_text,
                                (int32_t)extract_bits(raw_data, 1, 20));
             queue_log_row("%lu,STD,0x007,GPS_SPEED,1,-,"
                           "speed_scaled,%s,,",
                           (unsigned long)HAL_GetTick(), speed_text);
-            char str[64];
-            //snprintf(str, sizeof str, "%.4f", v);
-            //LCD_PrintStrAt(&lcd, 1, 6, str);
-            (void)v;
+            printf("GPS current speed: %s\r\n", speed_text);
         } else {
             queue_log_row("%lu,STD,0x007,GPS_SPEED,0,-,,,,",
                           (unsigned long)HAL_GetTick());
+            printf("GPS current speed: invalid\r\n");
         }
         break;
 

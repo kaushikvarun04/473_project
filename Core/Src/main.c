@@ -107,22 +107,13 @@ static void vLCD_Task(void *pvParameters)
 {
   (void)pvParameters;
   static LCD_Handle lcd;
-  CAN_Message message;
 
   LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
-  LCD_DisplaySpeed(&lcd, 0.0f, false);
-
-  for (;;)
-  {
-    if (xQueueReceive(canDisplayQueue, &message, portMAX_DELAY) == pdPASS)
-    {
-      uint64_t rawData = CAN_Message_ToU64(&message);
-      bool hasFix = extract_bits(rawData, 0, 1) != 0;
-      float speedMph = (float)decode_physical_value(
-          rawData, 1, 20, 0, SPEED_SCALE);
-      LCD_DisplaySpeed(&lcd, speedMph, hasFix);
-    }
-  }
+  LCD_PrintLinePadded(&lcd, 0, "LCD TEST");
+  LCD_PrintLinePadded(&lcd, 1, "SPI DISPLAY OK");
+  LCD_PrintLinePadded(&lcd, 2, "Visible = working");
+  LCD_PrintLinePadded(&lcd, 3, "");
+  vTaskSuspend(NULL);
 }
 
 static void vCAN_RxTask(void *pvParameters)
@@ -323,6 +314,8 @@ static void vSdLoggerTask(void *pvParameters)
       }
 
       rowsSinceSync++;
+      printf("SD logger: wrote CSV row (%u bytes)\r\n",
+             (unsigned)writeLength);
     }
 
     TickType_t now = xTaskGetTickCount();
@@ -549,40 +542,22 @@ int main(void)
   }
 
   // LCD_PrintStrAt(&lcd,0,2, "speed:");
-  // xTaskCreate(vStartSdTask, "SD", 1024, NULL, 5 , &StartSdTask);
-  // BaseType_t ok = xTaskCreate(vStartSdTask, "SD", 2048, NULL, 5, &StartSdTask);  /* 2048 words = 8 KB */
-  // if (ok != pdPASS)
-  // {
-  //   printf("SD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
-  //   Error_Handler();
-  // }
-  // BaseType_t okLCD = xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
-  //   if (okLCD != pdPASS)
-  // {
-  //   printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
-  //   Error_Handler();
-  // }
-
-
-  // BaseType_t sdTaskStatus =
-  //     xTaskCreate(vSdLoggerTask, "sdLogger", 768, NULL,
-  //                 tskIDLE_PRIORITY + 1, &StartSdTask);
-  // if (sdTaskStatus != pdPASS)
-  // {
-  //   printf("SD logger task creation failed, free heap = %u\r\n",
-  //          (unsigned)xPortGetFreeHeapSize());
-  //   Error_Handler();
-  // }
-
-  BaseType_t lcdTaskStatus =
-      xTaskCreate(vLCD_Task, "lcd", 512, NULL,
-                  tskIDLE_PRIORITY + 1, &LCD_Task);
-  if (lcdTaskStatus != pdPASS)
+  BaseType_t sdLoggerTaskStatus =
+      xTaskCreate(vSdLoggerTask, "sdLogger", 1024, NULL,
+                  tskIDLE_PRIORITY + 1, &StartSdTask);
+  if (sdLoggerTaskStatus != pdPASS)
   {
-    printf("LCD task creation failed, free heap = %u\r\n",
+    printf("SD logger task creation failed, free heap = %u\r\n",
            (unsigned)xPortGetFreeHeapSize());
     Error_Handler();
   }
+  BaseType_t okLCD = xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
+    if (okLCD != pdPASS)
+  {
+    printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
+    Error_Handler();
+  }
+
 
   BaseType_t canRxTaskStatus =
       xTaskCreate(vCAN_RxTask, "canrx", 1028, NULL,

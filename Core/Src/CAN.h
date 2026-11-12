@@ -17,7 +17,7 @@
 /* ------------------------------------------------------------------ */
 #define QUEUE_SIZE      64          /* RX ring buffer depth (frames)   */
 #define CAN_LOG_ROW_SIZE 128
-#define CAN_LOG_QUEUE_LENGTH 16
+#define CAN_LOG_QUEUE_LENGTH 32
 #define CAN_LOG_CSV_HEADER \
     "uptime_ms,format,id,message,valid,node_id,signal1,signal1_value,signal2,signal2_value\r\n"
 
