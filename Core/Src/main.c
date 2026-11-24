@@ -55,14 +55,12 @@ ADC_HandleTypeDef hadc1;
 
 CAN_HandleTypeDef hcan1;
 
-I2C_HandleTypeDef hi2c1;
-
-UART_HandleTypeDef hlpuart1;
-
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi3;
 
 TIM_HandleTypeDef htim2;
+
+UART_HandleTypeDef huart2;
 
 osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
@@ -75,15 +73,13 @@ static void MX_GPIO_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_LPUART1_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_SPI3_Init(void);
-static void MX_I2C1_Init(void);
+static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
-static void SD_Card_Test(void);
 extern volatile uint16_t Timer1, Timer2;
 
 uint8_t Buffer[25] = {0};
@@ -169,53 +165,6 @@ static void vThrottleCanTask(void *pvParameters)
   }
 }
 TaskHandle_t CAN_Task_Handle = NULL;
-
-// void vStartSdTask(void *pvparameters)
-// {
-//   printf("SD task started\r\n");
-
-//   SD_Card_Test();          /* one-shot test for now */
-//     // printf("SD task high water mark: %lu\r\n", uxTaskGetStackHighWaterMark(NULL));  
-
-//   for (;;)
-//   {
-//     osDelay(1000);         /* idle once the test is done */
-//   }
-// }
-
-// void vLCD_Task(void *pvparameters)
-// {
-//   printf("LCD task started\r\n");
-//   // LCD_Handle lcd;
-//   // LCD_Init(&lcd, &hspi3, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_6);
-//   // LCD_Clear(&lcd);
-//   // osDelay(100);
-//   // LCD_Clear(&lcd);
-//   // LCD_PrintStrAt(&lcd, 0,0, "Hello FREDDY :)1");
-//   printf("LCD WRITES\r\n");
-//   // osDelay(500);
-//   // LCD_PrintStrAt(&lcd,0,2, "speed:");
-//   // I2C_LCD_Init();
-//   // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 0, HeartChar);
-//   // // I2C_LCD_CreateCustomChar(MyI2C_LCD, 1, SmileyFaceChar);
-//   // I2C_LCD_SetCursor( 0, 0);
-//   // I2C_LCD_WriteString( "Hello world");
-//   // I2C_LCD_SetCursor( 0, 1);
-//   // I2C_LCD_WriteString( "I2C LCD ");
-//   // I2C_LCD_PrintCustomChar(MyI2C_LCD, 1);
-//   // I2C_LCD_PrintCustomChar(MyI2C_LCD, 0);
-//   I2C_LCD_Init(MyI2C_LCD);
-//   I2C_LCD_SetCursor(MyI2C_LCD, 0, 0);
-//   I2C_LCD_WriteString(MyI2C_LCD, "DeepBlueMbedded");
-//   I2C_LCD_SetCursor(MyI2C_LCD, 0, 1);
-//   I2C_LCD_WriteString(MyI2C_LCD, "I2C LCD ");
-
-
-//     printf("LCD WRITES\r\n");
-
-
-//   vTaskDelete(NULL);
-// }
 
 
 static TaskHandle_t canRxHandle = NULL;
@@ -314,8 +263,8 @@ static void vSdLoggerTask(void *pvParameters)
       }
 
       rowsSinceSync++;
-      printf("SD logger: wrote CSV row (%u bytes)\r\n",
-             (unsigned)writeLength);
+      //printf("SD logger: wrote CSV row (%u bytes)\r\n",
+      //       (unsigned)writeLength);
     }
 
     TickType_t now = xTaskGetTickCount();
@@ -373,117 +322,6 @@ static void CanRxTask(void *arg)
 }
 
 
-
-
-static void SD_Card_Test(void)
-{
-  printf("\r\n------------------[ SD Card Test ]--------------------\r\n");
-  static FATFS FatFs;
-  static FIL Fil;
-  FRESULT FR_Status;
-  FATFS *FS_Ptr;
-  UINT RWC, WWC; // Read/Write Word Counter
-  DWORD FreeClusters;
-  uint32_t TotalSize, FreeSpace;
-  char RW_Buffer[200];
-    printf("0BEFORE DO LOOP \r\n");
-
-  do
-  {
-    printf("INSIDE DO LOOP..\r\n");
-    //------------------[ Mount The SD Card ]--------------------
-    FR_Status = f_mount(&FatFs, "", 1);
-    if (FR_Status != FR_OK)
-    {
-      printf("1Error! While Mounting SD Card, Error Code: (%i)\r\n", FR_Status);
-
-      break;
-    }
-    printf("SD Card Mounted Successfully! \r\n\n");
-
-    //------------------[ Get & Print The SD Card Size & Free Space ]--------------------
-    f_getfree("", &FreeClusters, &FS_Ptr);
-    TotalSize = (uint32_t)((FS_Ptr->n_fatent - 2) * FS_Ptr->csize * 0.5);
-    FreeSpace = (uint32_t)(FreeClusters * FS_Ptr->csize * 0.5);
-    printf("1Total SD Card Size: %lu Bytes\r\n", TotalSize);
-    printf("1Free SD Card Space: %lu Bytes\r\n\n", FreeSpace);
-    //------------------[ Open A Text File For Write & Write Data ]--------------------
-    //Open the file
-    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_WRITE | FA_READ | FA_CREATE_ALWAYS);
-    if(FR_Status != FR_OK)
-    {
-
-      printf("1Error! While Creating/Opening A New Text File, Error Code: (%i)\r\n", FR_Status);
-
-      break;
-    }
-    printf("Text File Created & Opened! Writing Data To The Text File..\r\n\n");
-    // (1) Write Data To The Text File [ Using f_puts() Function ]
-    f_puts("1.2 Hello! From STM32 To SD Card Over SPI, Using f_puts()\n", &Fil);
-    // (2) Write Data To The Text File [ Using f_write() Function ]
-    strcpy(RW_Buffer, "Hello! From STM32 To SD Card Over SPI, Using f_write()\r\n");
-    f_write(&Fil, RW_Buffer, strlen(RW_Buffer), &WWC);
-    // Close The File
-    f_close(&Fil);
-    //------------------[ Open A Text File For Read & Read Its Data ]--------------------
-    // Open The File
-    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_READ);
-    if(FR_Status != FR_OK)
-    {
-      printf("1Error! While Opening (TextFileWrite.txt) File For Read.. \r\n");
-      break;
-    }
-    // (1) Read The Text File's Data [ Using f_gets() Function ]
-    f_gets(RW_Buffer, sizeof(RW_Buffer), &Fil);
-    printf("1Data Read From (TextFileWrite.txt) Using f_gets():%s", RW_Buffer);
-    // (2) Read The Text File's Data [ Using f_read() Function ]
-    f_read(&Fil, RW_Buffer, f_size(&Fil), &RWC);
-
-    printf("1Data Read From (TextFileWrite.txt) Using f_read():%s", RW_Buffer);
-
-    // Close The File
-    f_close(&Fil);
-
-    printf("1File Closed! \r\n\n");
-
-    //------------------[ Open An Existing Text File, Update Its Content, Read It Back ]--------------------
-    // (1) Open The Existing File For Write (Update)
-    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_OPEN_EXISTING | FA_WRITE);
-    FR_Status = f_lseek(&Fil, f_size(&Fil)); // Move The File Pointer To The EOF (End-Of-File)
-    if(FR_Status != FR_OK)
-    {
-      printf("1Error! While Opening (TextFileWrite.txt) File For Update.. \r\n");
-      break;
-    }
-    // (2) Write New Line of Text Data To The File
-    FR_Status = f_puts("1.2 This New Line Was Added During Update!\r\n", &Fil);
-    f_close(&Fil);
-    memset(RW_Buffer,'\0',sizeof(RW_Buffer)); // Clear The Buffer
-    // (3) Read The Contents of The Text File After The Update
-    FR_Status = f_open(&Fil, "TextFileWrite1.txt", FA_READ); // Open The File For Read
-    f_read(&Fil, RW_Buffer, f_size(&Fil), &RWC);
-    printf("1Data Read From (TextFileWrite.txt) After Update:%s", RW_Buffer);
-    f_close(&Fil);
-    //------------------[ Delete The Text File ]--------------------
-    // Delete The File
-    /*
-    FR_Status = f_unlink(TextFileWrite.txt);
-    if (FR_Status != FR_OK){
-        printf(TxBuffer, "Error! While Deleting The (TextFileWrite.txt) File.. \r\n");
-        printf(TxBuffer);
-    }
-    */
-  } while(0);
-  //------------------[ Test Complete! Unmount The SD Card ]--------------------
-  FR_Status = f_mount(NULL, "", 0);
-  if (FR_Status != FR_OK)
-  {
-      printf("1Error! While Un-mounting SD Card, Error Code: (%i)\r\n", FR_Status);
-  } else{
-      printf("1SD Card Un-mounted Successfully! \r\n");
-  }
-}
-
 /* USER CODE END 0 */
 
 /**
@@ -519,10 +357,9 @@ int main(void)
   MX_SPI1_Init();
   MX_FATFS_Init();
   MX_ADC1_Init();
-  MX_LPUART1_UART_Init();
   MX_TIM2_Init();
   MX_SPI3_Init();
-  MX_I2C1_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   printf("HELLO THERE!\r\n");
   canLogQueue = xQueueCreate(CAN_LOG_QUEUE_LENGTH, CAN_LOG_ROW_SIZE);
@@ -542,21 +379,21 @@ int main(void)
   }
 
   // LCD_PrintStrAt(&lcd,0,2, "speed:");
-  BaseType_t sdLoggerTaskStatus =
-      xTaskCreate(vSdLoggerTask, "sdLogger", 1024, NULL,
-                  tskIDLE_PRIORITY + 1, &StartSdTask);
-  if (sdLoggerTaskStatus != pdPASS)
-  {
-    printf("SD logger task creation failed, free heap = %u\r\n",
-           (unsigned)xPortGetFreeHeapSize());
-    Error_Handler();
-  }
-  BaseType_t okLCD = xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
-    if (okLCD != pdPASS)
-  {
-    printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
-    Error_Handler();
-  }
+  // BaseType_t sdLoggerTaskStatus =
+  //     xTaskCreate(vSdLoggerTask, "sdLogger", 1024, NULL,
+  //                 tskIDLE_PRIORITY + 1, &StartSdTask);
+  // if (sdLoggerTaskStatus != pdPASS)
+  // {
+  //   printf("SD logger task creation failed, free heap = %u\r\n",
+  //          (unsigned)xPortGetFreeHeapSize());
+  //   Error_Handler();
+  // }
+  // BaseType_t okLCD = xTaskCreate(vLCD_Task, "LCD", 1024, NULL, 5 , &LCD_Task);
+  //   if (okLCD != pdPASS)
+  // {
+  //   printf("LCD task create failed, free heap = %u\r\n", (unsigned)xPortGetFreeHeapSize());
+  //   Error_Handler();
+  // }
 
 
   BaseType_t canRxTaskStatus =
@@ -572,15 +409,15 @@ int main(void)
 
     if (CAN_Comm_Init(&hcan1) != HAL_OK)
         Error_Handler();
-    // BaseType_t throttleTaskStatus =
-    //     xTaskCreate(vThrottleCanTask, "throttleTX", 1024, NULL,
-    //                 tskIDLE_PRIORITY + 2, &throttleTxHandle);
-    // if (throttleTaskStatus != pdPASS)
-    // {
-    //   printf("Throttle CAN task creation failed, free heap = %u\r\n",
-    //          (unsigned)xPortGetFreeHeapSize());
-    //   Error_Handler();
-    // }
+    BaseType_t throttleTaskStatus =
+        xTaskCreate(vThrottleCanTask, "throttleTX", 1024, NULL,
+                    tskIDLE_PRIORITY + 2, &throttleTxHandle);
+    if (throttleTaskStatus != pdPASS)
+    {
+      printf("Throttle CAN task creation failed, free heap = %u\r\n",
+             (unsigned)xPortGetFreeHeapSize());
+      Error_Handler();
+    }
 
 
   /* USER CODE END 2 */
@@ -644,10 +481,16 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
+  /** Configure LSE Drive Capability
+  */
+  HAL_PWR_EnableBkUpAccess();
+  __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
+
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE|RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = 0;
   RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
@@ -676,6 +519,10 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
+  /** Enable MSI Auto calibration
+  */
+  HAL_RCCEx_EnableMSIPLLMode();
 }
 
 /**
@@ -770,88 +617,6 @@ static void MX_CAN1_Init(void)
   /* USER CODE BEGIN CAN1_Init 2 */
 
   /* USER CODE END CAN1_Init 2 */
-
-}
-
-/**
-  * @brief I2C1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C1_Init(void)
-{
-
-  /* USER CODE BEGIN I2C1_Init 0 */
-
-  /* USER CODE END I2C1_Init 0 */
-
-  /* USER CODE BEGIN I2C1_Init 1 */
-
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00B07CB4;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Analogue filter
-  */
-  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Digital filter
-  */
-  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C1_Init 2 */
-
-  /* USER CODE END I2C1_Init 2 */
-
-}
-
-/**
-  * @brief LPUART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_LPUART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN LPUART1_Init 0 */
-
-  /* USER CODE END LPUART1_Init 0 */
-
-  /* USER CODE BEGIN LPUART1_Init 1 */
-
-  /* USER CODE END LPUART1_Init 1 */
-  hlpuart1.Instance = LPUART1;
-  hlpuart1.Init.BaudRate = 115200;
-  hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
-  hlpuart1.Init.StopBits = UART_STOPBITS_1;
-  hlpuart1.Init.Parity = UART_PARITY_NONE;
-  hlpuart1.Init.Mode = UART_MODE_TX_RX;
-  hlpuart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  hlpuart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  hlpuart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&hlpuart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN LPUART1_Init 2 */
-
-  /* USER CODE END LPUART1_Init 2 */
 
 }
 
@@ -985,6 +750,42 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_SWAP_INIT;
+  huart2.AdvancedInit.Swap = UART_ADVFEATURE_SWAP_ENABLE;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -1002,37 +803,23 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_15, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4|GPIO_PIN_6, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4|GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  /*Configure GPIO pins : PA4 PA15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : VCP_RX_Pin */
-  GPIO_InitStruct.Pin = VCP_RX_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF3_USART2;
-  HAL_GPIO_Init(VCP_RX_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PB4 PB6 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_6;
+  /*Configure GPIO pins : PB4 PB6 PB7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PB7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -1048,7 +835,7 @@ static void MX_GPIO_Init(void)
 #endif /* __GNUC__ */
 PUTCHAR_PROTOTYPE
 {
-  HAL_UART_Transmit(&hlpuart1, (uint8_t *)&ch, 1, 0xFFFF);
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
   return ch;
 }
 

@@ -102,6 +102,7 @@ void CAN_Comm_SetRxTask(void *task_handle)
 /* Overrides the weak HAL callback. Define this only once in the project. */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
+    printf("Message received in callback");
     CAN_RxHeaderTypeDef hdr;
     uint8_t data[8];
     bool got_any = false;
@@ -320,6 +321,7 @@ float readTempC(int adc)
 
 void handle_message(const CAN_Message *msg)
 {   
+    printf("Message Received!\n");
     uint64_t raw_data = CAN_Message_ToU64(msg);
 
     if (msg->is_extended)
